@@ -1,7 +1,16 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("JWT_SECRET must be set in production");
+  }
+  console.warn("JWT_SECRET not set — using insecure dev fallback. DO NOT use in production.");
+}
+
+const secret = JWT_SECRET || "dev-secret-not-for-production";
 
 export interface AuthRequest extends Request {
   user?: { id: number; email: string };
@@ -15,7 +24,7 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
 
   const token = header.split(" ")[1];
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as { id: number; email: string };
+    const payload = jwt.verify(token, secret) as { id: number; email: string };
     req.user = payload;
     next();
   } catch {
@@ -24,5 +33,5 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
 }
 
 export function signToken(payload: { id: number; email: string }): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: "24h" });
+  return jwt.sign(payload, secret, { expiresIn: "24h" });
 }

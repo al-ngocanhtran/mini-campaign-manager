@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
   name VARCHAR(255) NOT NULL,
   subject VARCHAR(500) NOT NULL,
   body TEXT NOT NULL,
-  status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'scheduled', 'sent')),
+  status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'scheduled', 'sending', 'sent')),
   scheduled_at TIMESTAMP WITH TIME ZONE,
   created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

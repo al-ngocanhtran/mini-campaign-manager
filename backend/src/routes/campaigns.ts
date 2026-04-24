@@ -1,5 +1,7 @@
 import { Router, Response } from "express";
-import pool from "../db.js";
+import { QueryTypes } from "sequelize";
+import { sequelize } from "../db.js";
+import { Campaign, Recipient, CampaignRecipient } from "../models/index.js";
 import { authenticate, AuthRequest } from "../middleware/auth.js";
 import {
   createCampaignSchema,
@@ -8,38 +10,35 @@ import {
 } from "../validation/schemas.js";
 
 const router = Router();
-
-// All campaign routes require authentication
 router.use(authenticate);
 
-// GET /campaigns — List campaigns for the authenticated user
+// GET /campaigns — Paginated list for the authenticated user
 router.get("/", async (req: AuthRequest, res: Response) => {
   const page = Math.max(1, parseInt(req.query.page as string) || 1);
   const limit = Math.min(50, Math.max(1, parseInt(req.query.limit as string) || 10));
   const offset = (page - 1) * limit;
 
-  const { rows: campaigns } = await pool.query(
-    `SELECT c.*,
-            COUNT(cr.recipient_id)::int AS recipient_count
-     FROM campaigns c
-     LEFT JOIN campaign_recipients cr ON cr.campaign_id = c.id
-     WHERE c.created_by = $1
-     GROUP BY c.id
-     ORDER BY c.created_at DESC
-     LIMIT $2 OFFSET $3`,
-    [req.user!.id, limit, offset]
-  );
+  const { rows, count } = await Campaign.findAndCountAll({
+    where: { created_by: req.user!.id },
+    include: [{ model: CampaignRecipient, as: "recipientLinks", attributes: [] }],
+    attributes: {
+      include: [[sequelize.fn("COUNT", sequelize.col("recipientLinks.recipient_id")), "recipient_count"]],
+    },
+    group: ["Campaign.id"],
+    order: [["created_at", "DESC"]],
+    limit,
+    offset,
+    subQuery: false,
+  }).then(async (result) => {
+    // findAndCountAll with group returns count as array
+    const total = Array.isArray(result.count) ? result.count.length : result.count;
+    return { rows: result.rows, count: total };
+  });
 
-  const {
-    rows: [{ count }],
-  } = await pool.query("SELECT COUNT(*)::int AS count FROM campaigns WHERE created_by = $1", [
-    req.user!.id,
-  ]);
-
-  res.json({ campaigns, total: count, page, limit });
+  res.json({ campaigns: rows, total: count, page, limit });
 });
 
-// POST /campaigns — Create a new campaign
+// POST /campaigns — Create a new campaign (starts as draft)
 router.post("/", async (req: AuthRequest, res: Response) => {
   const parsed = createCampaignSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -47,292 +46,246 @@ router.post("/", async (req: AuthRequest, res: Response) => {
   }
 
   const { name, subject, body, recipientEmails } = parsed.data;
-  const client = await pool.connect();
+  const uniqueEmails = [...new Set(recipientEmails.map((e) => e.toLowerCase()))];
 
-  try {
-    await client.query("BEGIN");
-
-    // Create campaign
-    const {
-      rows: [campaign],
-    } = await client.query(
-      `INSERT INTO campaigns (name, subject, body, created_by)
-       VALUES ($1, $2, $3, $4)
-       RETURNING *`,
-      [name, subject, body, req.user!.id]
+  const campaign = await sequelize.transaction(async (t) => {
+    const created = await Campaign.create(
+      { name, subject, body, created_by: req.user!.id },
+      { transaction: t }
     );
 
-    // Upsert recipients and link to campaign
-    for (const email of recipientEmails) {
-      const {
-        rows: [recipient],
-      } = await client.query(
-        `INSERT INTO recipients (email, name)
-         VALUES ($1, $2)
-         ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-         RETURNING id`,
-        [email, email.split("@")[0]]
-      );
-
-      await client.query(
-        `INSERT INTO campaign_recipients (campaign_id, recipient_id)
-         VALUES ($1, $2)
-         ON CONFLICT DO NOTHING`,
-        [campaign.id, recipient.id]
-      );
-    }
-
-    await client.query("COMMIT");
-
-    // Return campaign with recipient count
-    const {
-      rows: [result],
-    } = await pool.query(
-      `SELECT c.*, COUNT(cr.recipient_id)::int AS recipient_count
-       FROM campaigns c
-       LEFT JOIN campaign_recipients cr ON cr.campaign_id = c.id
-       WHERE c.id = $1
-       GROUP BY c.id`,
-      [campaign.id]
+    // Bulk upsert recipients
+    await Recipient.bulkCreate(
+      uniqueEmails.map((email) => ({ email, name: email.split("@")[0] })),
+      {
+        transaction: t,
+        updateOnDuplicate: ["email"],
+      }
     );
 
-    res.status(201).json(result);
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
-  }
+    const recipients = await Recipient.findAll({
+      where: { email: uniqueEmails },
+      transaction: t,
+    });
+
+    await CampaignRecipient.bulkCreate(
+      recipients.map((r) => ({ campaign_id: created.id, recipient_id: r.id })),
+      { transaction: t, ignoreDuplicates: true }
+    );
+
+    return created;
+  });
+
+  const result = campaign.toJSON() as Record<string, unknown>;
+  result.recipient_count = uniqueEmails.length;
+  res.status(201).json(result);
 });
 
-// GET /campaigns/:id — Campaign details with recipient stats
+// GET /campaigns/:id — Campaign with full recipient list
 router.get("/:id", async (req: AuthRequest, res: Response) => {
-  const {
-    rows: [campaign],
-  } = await pool.query(
-    `SELECT c.*
-     FROM campaigns c
-     WHERE c.id = $1 AND c.created_by = $2`,
-    [req.params.id, req.user!.id]
-  );
+  const campaign = await Campaign.findOne({
+    where: { id: req.params.id, created_by: req.user!.id },
+  });
 
   if (!campaign) {
     return res.status(404).json({ error: "Campaign not found" });
   }
 
-  const { rows: recipients } = await pool.query(
+  const recipients = await sequelize.query<{
+    id: number;
+    email: string;
+    name: string | null;
+    status: string;
+    sent_at: Date | null;
+    opened_at: Date | null;
+  }>(
     `SELECT r.id, r.email, r.name, cr.status, cr.sent_at, cr.opened_at
-     FROM campaign_recipients cr
-     JOIN recipients r ON r.id = cr.recipient_id
-     WHERE cr.campaign_id = $1
-     ORDER BY r.email`,
-    [req.params.id]
+       FROM campaign_recipients cr
+       JOIN recipients r ON r.id = cr.recipient_id
+      WHERE cr.campaign_id = :campaignId
+      ORDER BY r.email`,
+    { replacements: { campaignId: campaign.id }, type: QueryTypes.SELECT }
   );
 
-  res.json({ ...campaign, recipients });
+  res.json({ ...campaign.toJSON(), recipients });
 });
 
-// PATCH /campaigns/:id — Update a draft campaign
+// PATCH /campaigns/:id — Update a draft campaign (409 if not draft)
 router.patch("/:id", async (req: AuthRequest, res: Response) => {
   const parsed = updateCampaignSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
   }
 
-  const {
-    rows: [campaign],
-  } = await pool.query("SELECT * FROM campaigns WHERE id = $1 AND created_by = $2", [
-    req.params.id,
-    req.user!.id,
-  ]);
+  const campaign = await Campaign.findOne({
+    where: { id: req.params.id, created_by: req.user!.id },
+  });
 
   if (!campaign) {
     return res.status(404).json({ error: "Campaign not found" });
   }
 
   if (campaign.status !== "draft") {
-    return res.status(400).json({ error: "Only draft campaigns can be edited" });
+    return res.status(409).json({ error: "Only draft campaigns can be edited" });
   }
 
-  const updates = parsed.data;
-  const fields: string[] = [];
-  const values: unknown[] = [];
-  let idx = 1;
+  // Whitelist columns — do NOT derive from Zod output keys (defense in depth)
+  const updates: Partial<{ name: string; subject: string; body: string }> = {};
+  if (parsed.data.name !== undefined) updates.name = parsed.data.name;
+  if (parsed.data.subject !== undefined) updates.subject = parsed.data.subject;
+  if (parsed.data.body !== undefined) updates.body = parsed.data.body;
 
-  for (const [key, value] of Object.entries(updates)) {
-    if (value !== undefined) {
-      fields.push(`${key} = $${idx}`);
-      values.push(value);
-      idx++;
-    }
-  }
-
-  if (fields.length === 0) {
-    return res.json(campaign);
-  }
-
-  fields.push(`updated_at = NOW()`);
-  values.push(req.params.id);
-
-  const {
-    rows: [updated],
-  } = await pool.query(
-    `UPDATE campaigns SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`,
-    values
-  );
-
-  res.json(updated);
+  await campaign.update(updates);
+  res.json(campaign);
 });
 
-// DELETE /campaigns/:id — Delete a draft campaign
+// DELETE /campaigns/:id — Delete a draft campaign (409 if not draft)
 router.delete("/:id", async (req: AuthRequest, res: Response) => {
-  const {
-    rows: [campaign],
-  } = await pool.query("SELECT * FROM campaigns WHERE id = $1 AND created_by = $2", [
-    req.params.id,
-    req.user!.id,
-  ]);
+  const campaign = await Campaign.findOne({
+    where: { id: req.params.id, created_by: req.user!.id },
+  });
 
   if (!campaign) {
     return res.status(404).json({ error: "Campaign not found" });
   }
 
   if (campaign.status !== "draft") {
-    return res.status(400).json({ error: "Only draft campaigns can be deleted" });
+    return res.status(409).json({ error: "Only draft campaigns can be deleted" });
   }
 
-  await pool.query("DELETE FROM campaigns WHERE id = $1", [req.params.id]);
+  await campaign.destroy();
   res.status(204).end();
 });
 
-// POST /campaigns/:id/schedule — Schedule a campaign
+// POST /campaigns/:id/schedule — Schedule a draft campaign (409 if not draft, 422 if past)
 router.post("/:id/schedule", async (req: AuthRequest, res: Response) => {
   const parsed = scheduleCampaignSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
   }
 
-  const {
-    rows: [campaign],
-  } = await pool.query("SELECT * FROM campaigns WHERE id = $1 AND created_by = $2", [
-    req.params.id,
-    req.user!.id,
-  ]);
+  const scheduledAt = new Date(parsed.data.scheduled_at);
+  if (scheduledAt <= new Date()) {
+    return res.status(422).json({ error: "scheduled_at must be a future timestamp" });
+  }
+
+  const campaign = await Campaign.findOne({
+    where: { id: req.params.id, created_by: req.user!.id },
+  });
 
   if (!campaign) {
     return res.status(404).json({ error: "Campaign not found" });
   }
 
   if (campaign.status !== "draft") {
-    return res.status(400).json({ error: "Only draft campaigns can be scheduled" });
+    return res.status(409).json({ error: "Only draft campaigns can be scheduled" });
   }
 
-  const {
-    rows: [updated],
-  } = await pool.query(
-    `UPDATE campaigns SET status = 'scheduled', scheduled_at = $1, updated_at = NOW()
-     WHERE id = $2 RETURNING *`,
-    [parsed.data.scheduled_at, req.params.id]
-  );
+  await campaign.update({ status: "scheduled", scheduled_at: scheduledAt });
+  res.json(campaign);
+});
 
+// POST /campaigns/:id/send — Transition draft|scheduled → sending → sent.
+// Atomic CAS on status gate prevents double-send races.
+router.post("/:id/send", async (req: AuthRequest, res: Response) => {
+  const campaignId = req.params.id;
+  const userId = req.user!.id;
+
+  const result = await sequelize.transaction(async (t) => {
+    // Atomic compare-and-swap: only one concurrent request succeeds
+    const [casRows] = await sequelize.query<{ id: number; status: string }>(
+      `UPDATE campaigns
+          SET status = 'sending', updated_at = NOW()
+        WHERE id = :id AND created_by = :userId AND status IN ('draft', 'scheduled')
+        RETURNING id, status`,
+      { replacements: { id: campaignId, userId }, type: QueryTypes.SELECT, transaction: t }
+    );
+
+    if (!casRows) {
+      // Gate failed — distinguish 404 (not found / not owned) from 409 (wrong state)
+      const existing = await Campaign.findOne({
+        where: { id: campaignId, created_by: userId },
+        transaction: t,
+      });
+      if (!existing) return { status: 404 as const };
+      return { status: 409 as const };
+    }
+
+    // Bulk-simulate per-recipient outcome. Single random() per row to keep
+    // sent/failed/opened_at mutually consistent (a failed row has no sent_at/opened_at).
+    await sequelize.query(
+      `WITH rolls AS (
+         SELECT recipient_id, random() AS delivery_roll, random() AS open_roll
+           FROM campaign_recipients
+          WHERE campaign_id = :id AND status = 'pending'
+       )
+       UPDATE campaign_recipients cr
+          SET status   = CASE WHEN rolls.delivery_roll < 0.9 THEN 'sent' ELSE 'failed' END,
+              sent_at  = CASE WHEN rolls.delivery_roll < 0.9 THEN NOW() ELSE NULL END,
+              opened_at = CASE WHEN rolls.delivery_roll < 0.9 AND rolls.open_roll < 0.35
+                               THEN NOW() ELSE NULL END
+          FROM rolls
+         WHERE cr.campaign_id = :id AND cr.recipient_id = rolls.recipient_id`,
+      { replacements: { id: campaignId }, transaction: t }
+    );
+
+    await sequelize.query(
+      `UPDATE campaigns SET status = 'sent', updated_at = NOW() WHERE id = :id`,
+      { replacements: { id: campaignId }, transaction: t }
+    );
+
+    return { status: 200 as const };
+  });
+
+  if (result.status === 404) {
+    return res.status(404).json({ error: "Campaign not found" });
+  }
+  if (result.status === 409) {
+    return res.status(409).json({ error: "Campaign cannot be sent in its current state" });
+  }
+
+  const updated = await Campaign.findByPk(campaignId);
   res.json(updated);
 });
 
-// POST /campaigns/:id/send — Simulate sending a campaign
-router.post("/:id/send", async (req: AuthRequest, res: Response) => {
-  const {
-    rows: [campaign],
-  } = await pool.query("SELECT * FROM campaigns WHERE id = $1 AND created_by = $2", [
-    req.params.id,
-    req.user!.id,
-  ]);
-
-  if (!campaign) {
-    return res.status(404).json({ error: "Campaign not found" });
-  }
-
-  if (campaign.status === "sent") {
-    return res.status(400).json({ error: "Campaign has already been sent" });
-  }
-
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-
-    // Simulate sending: mark all pending recipients as sent, randomly fail ~10%
-    const { rows: recipients } = await client.query(
-      `SELECT recipient_id FROM campaign_recipients
-       WHERE campaign_id = $1 AND status = 'pending'`,
-      [req.params.id]
-    );
-
-    const now = new Date().toISOString();
-    for (const r of recipients) {
-      const failed = Math.random() < 0.1; // 10% simulated failure rate
-      await client.query(
-        `UPDATE campaign_recipients
-         SET status = $1, sent_at = $2
-         WHERE campaign_id = $3 AND recipient_id = $4`,
-        [failed ? "failed" : "sent", failed ? null : now, req.params.id, r.recipient_id]
-      );
-    }
-
-    // Update campaign status
-    const {
-      rows: [updated],
-    } = await client.query(
-      `UPDATE campaigns SET status = 'sent', updated_at = NOW() WHERE id = $1 RETURNING *`,
-      [req.params.id]
-    );
-
-    await client.query("COMMIT");
-    res.json(updated);
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
-  }
-});
-
-// GET /campaigns/:id/stats — Campaign statistics
+// GET /campaigns/:id/stats — Aggregated stats
 router.get("/:id/stats", async (req: AuthRequest, res: Response) => {
-  const {
-    rows: [campaign],
-  } = await pool.query("SELECT id FROM campaigns WHERE id = $1 AND created_by = $2", [
-    req.params.id,
-    req.user!.id,
-  ]);
+  const campaign = await Campaign.findOne({
+    where: { id: req.params.id, created_by: req.user!.id },
+    attributes: ["id"],
+  });
 
   if (!campaign) {
     return res.status(404).json({ error: "Campaign not found" });
   }
 
-  const {
-    rows: [stats],
-  } = await pool.query(
+  const [stats] = await sequelize.query<{
+    total: number;
+    sent: number;
+    failed: number;
+    opened: number;
+  }>(
     `SELECT
        COUNT(*)::int AS total,
        COUNT(*) FILTER (WHERE status = 'sent')::int AS sent,
        COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
        COUNT(*) FILTER (WHERE opened_at IS NOT NULL)::int AS opened
-     FROM campaign_recipients
-     WHERE campaign_id = $1`,
-    [req.params.id]
+       FROM campaign_recipients
+      WHERE campaign_id = :id`,
+    { replacements: { id: campaign.id }, type: QueryTypes.SELECT }
   );
 
   const total = stats.total || 0;
   const sent = stats.sent || 0;
+  const failed = stats.failed || 0;
   const opened = stats.opened || 0;
 
-  res.json({
-    total,
-    sent,
-    failed: stats.failed || 0,
-    opened,
-    open_rate: total > 0 ? Math.round((opened / total) * 10000) / 100 : 0,
-    send_rate: total > 0 ? Math.round((sent / total) * 10000) / 100 : 0,
-  });
+  // open_rate = opened / sent (returns 0 when sent === 0 per CLAUDE.md §6)
+  // send_rate = sent / total (returns 0 when total === 0)
+  const open_rate = sent > 0 ? Math.round((opened / sent) * 10000) / 100 : 0;
+  const send_rate = total > 0 ? Math.round((sent / total) * 10000) / 100 : 0;
+
+  res.json({ total, sent, failed, opened, open_rate, send_rate });
 });
 
 export default router;

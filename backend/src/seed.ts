@@ -1,80 +1,64 @@
 import bcrypt from "bcrypt";
-import pool from "./db.js";
+import { sequelize, User, Campaign, Recipient, CampaignRecipient } from "./models/index.js";
 
 async function seed() {
-  // Create a test user
-  const hash = await bcrypt.hash("password123", 10);
-  const {
-    rows: [user],
-  } = await pool.query(
-    `INSERT INTO users (email, name, password_hash) VALUES ($1, $2, $3)
-     ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
-     RETURNING id`,
-    ["demo@example.com", "Demo User", hash]
+  const password_hash = await bcrypt.hash("password123", 12);
+
+  const [user] = await User.findOrCreate({
+    where: { email: "demo@example.com" },
+    defaults: { email: "demo@example.com", name: "Demo User", password_hash },
+  });
+
+  const emails = ["alice@example.com", "bob@example.com", "carol@example.com", "dave@example.com", "eve@example.com"];
+  const recipients = await Promise.all(
+    emails.map((email) =>
+      Recipient.findOrCreate({
+        where: { email },
+        defaults: { email, name: email.split("@")[0] },
+      }).then(([r]) => r)
+    )
   );
 
-  // Create some recipients
-  const recipientEmails = [
-    "alice@example.com",
-    "bob@example.com",
-    "carol@example.com",
-    "dave@example.com",
-    "eve@example.com",
-  ];
+  const draft = await Campaign.create({
+    name: "Spring Sale",
+    subject: "Don't miss our spring sale!",
+    body: "Big discounts await you...",
+    status: "draft",
+    created_by: user.id,
+  });
 
-  const recipientIds: number[] = [];
-  for (const email of recipientEmails) {
-    const {
-      rows: [r],
-    } = await pool.query(
-      `INSERT INTO recipients (email, name) VALUES ($1, $2)
-       ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
-       RETURNING id`,
-      [email, email.split("@")[0]]
-    );
-    recipientIds.push(r.id);
-  }
-
-  // Create a draft campaign
-  const {
-    rows: [draft],
-  } = await pool.query(
-    `INSERT INTO campaigns (name, subject, body, status, created_by)
-     VALUES ($1, $2, $3, 'draft', $4) RETURNING id`,
-    ["Spring Sale", "Don't miss our spring sale!", "Big discounts await you...", user.id]
+  await CampaignRecipient.bulkCreate(
+    recipients.map((r) => ({ campaign_id: draft.id, recipient_id: r.id })),
+    { ignoreDuplicates: true }
   );
 
-  for (const rid of recipientIds) {
-    await pool.query(
-      `INSERT INTO campaign_recipients (campaign_id, recipient_id) VALUES ($1, $2)
-       ON CONFLICT DO NOTHING`,
-      [draft.id, rid]
-    );
-  }
+  const sent = await Campaign.create({
+    name: "Welcome Email",
+    subject: "Welcome aboard!",
+    body: "Thanks for joining us...",
+    status: "sent",
+    created_by: user.id,
+  });
 
-  // Create a sent campaign
-  const {
-    rows: [sent],
-  } = await pool.query(
-    `INSERT INTO campaigns (name, subject, body, status, created_by)
-     VALUES ($1, $2, $3, 'sent', $4) RETURNING id`,
-    ["Welcome Email", "Welcome aboard!", "Thanks for joining us...", user.id]
+  const now = new Date();
+  await CampaignRecipient.bulkCreate(
+    recipients.map((r, i) => {
+      const delivered = i < 4;
+      const opened = delivered && i < 3;
+      return {
+        campaign_id: sent.id,
+        recipient_id: r.id,
+        status: delivered ? "sent" : ("failed" as const),
+        sent_at: delivered ? now : null,
+        opened_at: opened ? now : null,
+      };
+    }),
+    { ignoreDuplicates: true }
   );
-
-  const now = new Date().toISOString();
-  for (let i = 0; i < recipientIds.length; i++) {
-    const status = i < 4 ? "sent" : "failed";
-    const openedAt = i < 3 ? now : null;
-    await pool.query(
-      `INSERT INTO campaign_recipients (campaign_id, recipient_id, status, sent_at, opened_at)
-       VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
-      [sent.id, recipientIds[i], status, status === "sent" ? now : null, openedAt]
-    );
-  }
 
   console.log("Seed complete");
   console.log("Login: demo@example.com / password123");
-  await pool.end();
+  await sequelize.close();
 }
 
 seed().catch((err) => {
