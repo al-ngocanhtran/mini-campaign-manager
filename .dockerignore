@@ -1,0 +1,14 @@
+node_modules
+*/node_modules
+**/node_modules
+.git
+.gitignore
+dist
+*/dist
+.env
+.env.local
+.yarn/cache
+.yarn/install-state.gz
+coverage
+.DS_Store
+*.log

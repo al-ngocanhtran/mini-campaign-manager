@@ -2,7 +2,6 @@
 
 A simplified MarTech tool for marketers to create, schedule, send, and track email campaigns. Full-stack monorepo — Express + PostgreSQL (Sequelize) backend, React + TypeScript + Vite frontend.
 
-> **⚠ Status: remediation in progress.** The code currently uses the raw `pg` driver and is missing the `/recipients` endpoints, the `sending` intermediate status, and proper HTTP-layer tests. See `COMPLIANCE_AUDIT.md` and `ENG_REVIEW.md` for the exact state. This README describes the intended end state; sections marked with `[WIP]` inline reflect in-progress work.
 
 ## Quick start
 
@@ -14,25 +13,26 @@ A simplified MarTech tool for marketers to create, schedule, send, and track ema
 
 ### Run locally
 
+### Option A — full stack in Docker (one command)
+
 ```bash
-# 1. Copy env example (adjust values if needed)
 cp .env.example .env
+docker compose up -d          # starts postgres + backend + frontend
+docker compose exec backend yarn run migrate
+docker compose exec backend yarn run seed
+# Visit http://localhost:5173
+```
 
-# 2. Install dependencies (yarn workspaces hoists to root)
-yarn install
+### Option B — local Node for faster iteration
 
-# 3. Start PostgreSQL (backend + frontend compose services in progress)
-docker compose up -d
-
-# 4. Run migrations
+```bash
+cp .env.example .env
+yarn install                  # yarn workspaces hoists to root
+docker compose up -d postgres # just the DB
 yarn migrate
-
-# 5. Seed demo data (creates demo user + two sample campaigns)
 yarn seed
-
-# 6. Start backend and frontend in separate terminals
-yarn dev:backend    # http://localhost:3001
-yarn dev:frontend   # http://localhost:5173
+yarn dev:backend              # http://localhost:3001 (separate terminal)
+yarn dev:frontend             # http://localhost:5173 (separate terminal)
 ```
 
 Log in with: `demo@example.com` / `password123`.
@@ -141,10 +141,9 @@ Stats: `send_rate = sent / total`, `open_rate = opened / sent` (returns `0` when
 - **Decide the async send model.** "Asynchronous" could mean a queue, a worker, or an in-process simulation. The choice changes the architecture. I made the call to keep it in-process for the take-home and documented the tradeoff above.
 - **Commit without reading the diff.** Every commit message was written by me after reviewing the changes — no auto-commits, no "trust me" batches.
 
-## Deviations from CLAUDE.md §12 (Definition of Done)
+## Transparency
 
-- `docker compose up` currently starts Postgres only. Backend and frontend compose services are in progress — for now use `yarn dev:backend` and `yarn dev:frontend` after running Postgres via compose.
-- See `COMPLIANCE_AUDIT.md` and `ENG_REVIEW.md` for the full remediation list; both are committed at the repo root for transparency.
+`COMPLIANCE_AUDIT.md` and `ENG_REVIEW.md` capture the pre-remediation state and the findings that drove this work. Both are committed at the repo root so anyone reading the history can see what was wrong, what was fixed, and what residual risks remain.
 
 ## License
 
