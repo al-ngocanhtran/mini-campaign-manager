@@ -1,4 +1,5 @@
 import { store } from "../store";
+import { logout } from "../store/authSlice";
 
 const BASE = "";
 
@@ -13,6 +14,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       ...options.headers,
     },
   });
+
+  if (res.status === 401 && token) {
+    store.dispatch(logout());
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
@@ -71,6 +76,15 @@ export const sendCampaign = (id: number) =>
 export const getCampaignStats = (id: number) =>
   request<CampaignStats>(`/campaigns/${id}/stats`);
 
+// Recipients
+export const getRecipients = (page = 1, limit = 25) =>
+  request<{ recipients: RecipientRow[]; total: number; page: number; limit: number }>(
+    `/recipients?page=${page}&limit=${limit}`
+  );
+
+export const createRecipient = (data: { email: string; name?: string }) =>
+  request<RecipientRow>("/recipients", { method: "POST", body: JSON.stringify(data) });
+
 // Types
 export interface User {
   id: number;
@@ -84,7 +98,7 @@ export interface Campaign {
   name: string;
   subject: string;
   body: string;
-  status: "draft" | "scheduled" | "sent";
+  status: "draft" | "scheduled" | "sending" | "sent";
   scheduled_at: string | null;
   created_by: number;
   created_at: string;
@@ -99,6 +113,14 @@ export interface Recipient {
   status: "pending" | "sent" | "failed";
   sent_at: string | null;
   opened_at: string | null;
+}
+
+// A standalone recipient row (no campaign-specific fields)
+export interface RecipientRow {
+  id: number;
+  email: string;
+  name: string | null;
+  created_at: string;
 }
 
 export interface CampaignDetail extends Campaign {

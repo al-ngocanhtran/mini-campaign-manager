@@ -8,6 +8,7 @@ export default defineConfig({
     proxy: {
       "/auth": "http://localhost:3001",
       "/campaigns": "http://localhost:3001",
+      "/recipients": "http://localhost:3001",
       "/health": "http://localhost:3001",
     },
   },
