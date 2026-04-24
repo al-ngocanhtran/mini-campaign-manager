@@ -1,0 +1,20 @@
+{
+  "name": "mini-campaign-manager",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Full-stack mini campaign manager — marketers create, schedule, send, and track email campaigns",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev:backend": "yarn workspace campaign-manager-backend run dev",
+    "dev:frontend": "yarn workspace frontend run dev",
+    "build:frontend": "yarn workspace frontend run build",
+    "migrate": "yarn workspace campaign-manager-backend run migrate",
+    "seed": "yarn workspace campaign-manager-backend run seed",
+    "test": "yarn workspace campaign-manager-backend run test",
+    "lint:frontend": "yarn workspace frontend run lint"
+  },
+  "packageManager": "yarn@4.5.0"
+}
