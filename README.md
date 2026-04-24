@@ -109,37 +109,44 @@ Stats: `send_rate = sent / total`, `open_rate = opened / sent` (returns `0` when
 
 ## How I Used Claude Code
 
+This repo was built and then remediated in two distinct phases with Claude Code. Phase 1 produced the initial scaffold (Express + raw `pg`, React pages, Redux auth, Tailwind components). Phase 2 — the bulk of what you see now — was a systematic remediation against the spec, driven by two audit artifacts committed at the repo root: `COMPLIANCE_AUDIT.md` (gaps vs. `REQUIREMENTS.md` v2) and `ENG_REVIEW.md` (engineering quality of the as-built code).
+
 ### What I delegated
 
-- **Full codebase audit against the spec.** Two passes: a requirements-compliance audit (output in `COMPLIANCE_AUDIT.md`) and an engineering-quality review (output in `ENG_REVIEW.md`). This caught wrong HTTP status codes, a missing `sending` status, and a concurrency hole in the send endpoint that I would not have found on a second read.
-- **Scaffolding** — initial Express + pg backend, React pages, Redux auth slice, Tailwind components.
-- **Sequelize port** — converting the raw-SQL routes to Sequelize models and queries.
-- **HTTP-layer test rewrite** — replacing SQL-only tests with supertest integration tests that hit real route handlers.
+- **A compliance audit** via a dedicated business-analyst agent. Output: a section-by-section report with file+line evidence and a blocker/major/minor action list. This caught wrong HTTP status codes (`400` where `409`/`422` belong), a missing `sending` intermediate status, an empty README, and the absence of the `/recipients` endpoints.
+- **An engineering review** via the `plan-eng-review` skill against the as-built code. Output: ranked findings with severity + confidence scores. This is what surfaced the three real correctness risks: a double-send race (no row lock on the status transition), tests that bypassed the HTTP layer entirely (one "prevents deleting" test never called the DELETE endpoint — it asserted a JavaScript boolean), and a serial `await` loop in the send route that holds a pool connection through N round-trips.
+- **The Sequelize port** — converting raw `pg` queries to Sequelize models across `db.ts`, `routes/auth.ts`, `routes/campaigns.ts`, `seed.ts`. The route fixes (409/422 status codes, atomic CAS for `sending`, bulk `UPDATE` for send, `opened_at` simulation, `open_rate = opened/sent` formula, defense-in-depth column whitelist on PATCH, `JWT_SECRET` hard-fail, `recipientEmails.max(1000)`) were bundled into the port so the same files weren't rewritten twice.
+- **The supertest rewrite** — 20 tests exercising the real Express app, including a concurrency regression test that fires two `POST /send` requests in parallel and asserts exactly one `200` + one `409`.
+- **Docker-compose expansion** — Dockerfiles for backend + frontend, postgres healthcheck, wiring so `docker compose up` brings up the full stack.
 
-### Real prompts used
+### Real prompts I used
 
-1. *"Perform a thorough business/requirements compliance audit of this codebase against REQUIREMENTS.md v2. Cite file paths and line numbers for every finding. Group gaps by blocker/major/minor. Don't pad with generic advice."*
-   — produced the compliance audit.
+1. *"Perform a thorough business/requirements compliance audit of this codebase against REQUIREMENTS.md v2. Cite file paths and line numbers for every finding. Group gaps by blocker/major/minor. Do not modify any files — read only."*
+   → produced `COMPLIANCE_AUDIT.md`.
 
-2. *"Review the as-built implementation as if it were a proposed plan. Focus on what's structurally wrong or fragile in the code that exists today, even where it does meet the spec. Specifically evaluate: double-send race, tests that bypass the HTTP layer, serial await loops in the send route, and whether the PATCH dynamic SQL is safe."*
-   — surfaced the concurrency hole, the false-confidence tests, and the pool-exhaustion risk.
+2. *"Review the as-built implementation as if it were a proposed plan. Focus on what's structurally wrong or fragile in the code that exists today, even where it does meet the spec. Specifically evaluate: double-send race, tests that bypass the HTTP layer, serial await loops in the send route, PATCH dynamic-SQL construction, JWT secret fallback. Deliver an opinionated review with severity + confidence scores, not a rewrite plan."*
+   → produced `ENG_REVIEW.md`. The confidence-score discipline (I only kept findings ≥ 7/10 in the main report) cut noise significantly.
 
-3. *"Port the backend from raw pg to Sequelize. Bake in the route fixes (status codes 400→409/422, `sending` intermediate status via atomic compare-and-swap, bulk UPDATE for send) as part of the port so we don't touch the same code twice."*
-   — rewrote routes during the ORM migration.
+3. *"Port the backend from raw pg to Sequelize. Bake in the route fixes (status codes 400 → 409/422, `sending` intermediate status via atomic compare-and-swap, bulk UPDATE for send with random delivery/open) as part of the port so we do not touch the same files twice. Keep the SQL migration format; use Sequelize for queries. Verify by type-check + smoke curl against a live postgres."*
+   → produced the `452105c` commit.
 
 ### Where Claude Code was wrong / needed correction
 
-- **Initial scaffolding used `pg` directly**, following REQUIREMENTS.md v1's "no heavy ORMs" clause. REQUIREMENTS.md v2 reversed this and mandated Sequelize. I had to redirect to match the locked stack in CLAUDE.md §3.
-- **Initial send endpoint skipped the `sending` intermediate state** — the first draft went straight from draft to sent. That also left a double-send race unaddressed. The eng review caught it; the fix uses an atomic `UPDATE ... WHERE status IN ('draft','scheduled') RETURNING *` as both the CAS gate and the sending-status transition.
-- **Status codes** — the first pass used `400` for draft-guard violations. The spec and REST conventions want `409 Conflict` for state-transition failures and `422` for semantic validation (past `scheduled_at`).
-- **Tests looked comprehensive but weren't.** The initial test file asserted raw SQL behavior instead of route responses. A test named "prevents deleting a non-draft campaign" asserted a JavaScript boolean and never called the DELETE endpoint. I had this rewritten to hit the HTTP layer with supertest.
+- **First scaffold used `pg` directly** because REQUIREMENTS.md v1 explicitly said "no heavy ORMs." REQUIREMENTS.md v2 reversed that and mandated Sequelize. The v2 requirement wasn't caught until the compliance audit ran — that's on me for not re-reading the spec before building. Phase 2 had to port the entire data layer.
+- **The first Sequelize port used `DataTypes.ENUM` for `status` columns**, which conflicts with the existing `VARCHAR(20) + CHECK` migration and would have required a destructive schema rewrite. I changed it to `DataTypes.STRING(20)` with `validate.isIn` — keeps the migration stable and preserves the CHECK constraint as the source of truth.
+- **Yarn 4 default (PnP) broke TypeScript resolution** across every file in the backend (`Cannot find module 'express'`, `Property 'findOne' does not exist on type 'typeof Campaign'`, etc.). Claude initially just tried to push through. Once I identified the symptom, switching `.yarnrc.yml` to `nodeLinker: node-modules` fixed it in one shot.
+- **First status-code pass returned `400` for draft-guard violations** and for past `scheduled_at`. That's a REST misuse: `409 Conflict` is the right code for state-transition failures; `422 Unprocessable Entity` is the right code for a syntactically valid payload that fails a semantic check. Fixed after the compliance audit flagged it.
+- **First test suite was false confidence.** Five tests that all ran raw SQL and asserted JavaScript booleans. They passed, and they would have passed if every route returned `500`. I rewrote them to use supertest against the real Express app, with the concurrent-send race as an explicit regression test for the atomic CAS fix.
+- **Initial README was aspirational** — it described the end state as if already true while the code was mid-port. I added a visible `⚠ Status: remediation in progress` banner and removed it only after every blocker closed (`cdd628d`). Future me would write the banner *first* next time.
 
 ### What I would not let Claude Code do
 
-- **Pick the tech stack.** The stack is locked in CLAUDE.md — Sequelize, Vite, Redux Toolkit, Zod. I rejected suggestions to swap in Prisma, Zustand, or SWR for their respective alternatives.
-- **Write the auth flow without review.** JWT + bcrypt rounds, `JWT_SECRET` handling, token expiry, 401 middleware — I read every line. The original code had a silent fallback to a hard-coded dev secret, which fails open if the env var is missing in production (that's how secrets leak). Fixed to hard-fail at startup.
-- **Decide the async send model.** "Asynchronous" could mean a queue, a worker, or an in-process simulation. The choice changes the architecture. I made the call to keep it in-process for the take-home and documented the tradeoff above.
-- **Commit without reading the diff.** Every commit message was written by me after reviewing the changes — no auto-commits, no "trust me" batches.
+- **Pick the tech stack.** It's locked in `CLAUDE.md §3` — Sequelize, Vite, Redux Toolkit, Zod, Tailwind. I rejected drift toward Prisma, Zustand, and SWR even when they would have been marginally simpler.
+- **Ship the auth flow unreviewed.** `JWT_SECRET` had a silent fallback to a dev string — that's how secrets leak when someone forgets the env var in production. Replaced with a hard-fail at startup in production, plus a visible `console.warn` in non-prod. bcrypt rounds bumped from 10 to 12 (OWASP current); password minimum from 6 to 8 characters.
+- **Skip the concurrency regression test.** It would have been easy to fix the double-send race "in code" and move on. A race that's only accidentally absent from the next refactor is still a race. The test at `backend/tests/campaigns.test.ts` fires two parallel sends and asserts the outcome is `[200, 409]` sorted — never `[200, 200]`.
+- **Decide the async-send architecture.** "Asynchronous send" could mean a queue worker, a BullMQ job, or a simulated in-process transition. The choice changes the operational story. I made the explicit call to keep it in-process for the exercise and documented how it would scale to a real queue.
+- **Auto-commit batches.** Every one of the seven commits in `git log` has a hand-written message and an atomic scope. Claude's suggested messages went through review before landing.
+- **Run destructive operations without confirmation.** Moving from npm lock files to yarn workspaces required deleting the two `package-lock.json` files. That went through `git rm` + an explicit commit message rather than a silent blanket delete.
 
 ## Transparency
 
