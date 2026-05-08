@@ -1,13 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { readFileSync } from "fs";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
 import request from "supertest";
 import bcrypt from "bcrypt";
 
 // Force test DB + secret BEFORE importing app (modules read env on init)
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "test-secret-not-for-production";
+process.env.JWT_EXPIRES_IN = "24h";
 // Auth-flow tests fire >10 requests against /auth/register and /auth/login per
 // run; the dedicated tests/auth-rate-limit.test.ts spec covers the limiter itself
 // in isolation, so we disable it here to keep the existing suite hermetic.
@@ -22,17 +20,13 @@ const { sequelize, User, Campaign, Recipient, CampaignRecipient } = await import
 );
 const { signToken } = await import("../src/middleware/auth.js");
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
 let userAId: number;
 let userAToken: string;
 let userBId: number;
 
 beforeAll(async () => {
-  const sql = readFileSync(join(__dirname, "../migrations/001_initial.sql"), "utf-8");
-  // Clean slate, then apply schema (idempotent via IF NOT EXISTS)
-  await sequelize.query("DROP TABLE IF EXISTS campaign_recipients, campaigns, recipients, users CASCADE");
-  await sequelize.query(sql);
+  // Tests own the schema: sync from models for speed instead of running sequelize-cli migrations.
+  await sequelize.sync({ force: true });
 
   const hash = await bcrypt.hash("testpass123", 4);
   const userA = await User.create({ email: "alice@test.com", name: "Alice", password_hash: hash });

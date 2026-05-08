@@ -5,6 +5,7 @@ import request from "supertest";
 // in-memory limiter, separate from the campaigns suite which disables the limiter.
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "test-secret-not-for-production";
+process.env.JWT_EXPIRES_IN = "24h";
 process.env.RATE_LIMIT_DISABLED = "false";
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ||
