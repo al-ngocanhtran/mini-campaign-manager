@@ -1,123 +1,223 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import * as api from "../api/client";
+import { ArrowLeft, CalendarClock, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+
+import * as api from "@/api/client";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardFooter } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import { PageHeader } from "@/components/PageHeader";
+import { RecipientPicker } from "@/components/RecipientPicker";
+import { useIsMobile } from "@/lib/use-media-query";
 
 export function CampaignNew() {
   const [name, setName] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
-  const [emailsText, setEmailsText] = useState("");
-  const [error, setError] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+  const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [minScheduleAt] = useState(() =>
+    new Date(Date.now() + 60_000).toISOString().slice(0, 16),
+  );
 
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const isMobile = useIsMobile();
 
   const mutation = useMutation({
-    mutationFn: api.createCampaign,
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["campaigns"] });
-      navigate(`/campaigns/${data.id}`);
+    mutationFn: async (input: {
+      name: string;
+      subject: string;
+      body: string;
+      recipientEmails: string[];
+      scheduledAt: string;
+    }) => {
+      const created = await api.createCampaign({
+        name: input.name,
+        subject: input.subject,
+        body: input.body,
+        recipientEmails: input.recipientEmails,
+      });
+      let scheduleError: Error | null = null;
+      if (input.scheduledAt) {
+        try {
+          await api.scheduleCampaign(
+            created.id,
+            new Date(input.scheduledAt).toISOString(),
+          );
+        } catch (e) {
+          scheduleError = e instanceof Error ? e : new Error("Unknown error");
+        }
+      }
+      return { campaign: created, scheduleError };
     },
-    onError: (err: Error) => setError(err.message),
+    onSuccess: ({ campaign, scheduleError }) => {
+      queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+      if (scheduleError) {
+        toast.error("Draft saved, but couldn't schedule", {
+          description: scheduleError.message,
+        });
+      } else if (scheduleDate) {
+        toast.success("Campaign scheduled", {
+          description: new Date(scheduleDate).toLocaleString(undefined, {
+            dateStyle: "medium",
+            timeStyle: "short",
+          }),
+        });
+      } else {
+        toast.success("Campaign created", { description: campaign.name });
+      }
+      navigate(`/campaigns/${campaign.id}`);
+    },
+    onError: (err: Error) => {
+      toast.error("Couldn't create campaign", { description: err.message });
+    },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
-
-    const recipientEmails = emailsText
-      .split(/[\n,;]+/)
-      .map((e) => e.trim())
-      .filter(Boolean);
-
-    if (recipientEmails.length === 0) {
-      setError("Add at least one recipient email");
+    if (selectedEmails.length === 0) {
+      toast.error("Select at least one recipient");
       return;
     }
-
-    mutation.mutate({ name, subject, body, recipientEmails });
+    mutation.mutate({
+      name,
+      subject,
+      body,
+      recipientEmails: selectedEmails,
+      scheduledAt: scheduleDate,
+    });
   };
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold mb-6">New Campaign</h1>
+    <div className="mx-auto max-w-3xl">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="mb-6 -ml-2 text-muted-foreground"
+        onClick={() => navigate("/campaigns")}
+      >
+        <ArrowLeft className="size-4" />
+        Back to campaigns
+      </Button>
 
-      {error && (
-        <div className="bg-red-50 text-red-700 border border-red-200 rounded-md p-3 mb-4 text-sm">
-          {error}
-        </div>
-      )}
+      <PageHeader
+        eyebrow="New campaign"
+        title="Compose"
+        description="Draft your message, attach recipients, and send or schedule when ready."
+      />
 
-      <form onSubmit={handleSubmit} className="bg-white border rounded-lg p-6 space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Campaign Name</label>
-          <input
-            type="text"
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="e.g. Spring Sale 2024"
-          />
-        </div>
+      <Card>
+        <form onSubmit={handleSubmit}>
+          <CardContent className="space-y-6">
+            <div className="space-y-1.5">
+              <Label htmlFor="name">Campaign name</Label>
+              <Input
+                id="name"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Spring Sale 2026"
+              />
+              <p className="text-xs text-muted-foreground">
+                Internal label, not visible to recipients.
+              </p>
+            </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Email Subject</label>
-          <input
-            type="text"
-            required
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            className="w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="e.g. Don't miss our spring sale!"
-          />
-        </div>
+            <Separator />
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Email Body</label>
-          <textarea
-            required
-            rows={6}
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            className="w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="Write your email content here..."
-          />
-        </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="subject">Email subject</Label>
+              <Input
+                id="subject"
+                required
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="Don't miss our spring sale"
+              />
+            </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Recipient Emails
-          </label>
-          <textarea
-            required
-            rows={4}
-            value={emailsText}
-            onChange={(e) => setEmailsText(e.target.value)}
-            className="w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="One email per line, or comma-separated"
-          />
-          <p className="text-xs text-gray-400 mt-1">Separate emails with commas, semicolons, or newlines</p>
-        </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="body">Email body</Label>
+              <Textarea
+                id="body"
+                required
+                rows={isMobile ? 6 : 10}
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                placeholder="Write your email content here…"
+                className="font-mono text-sm leading-relaxed"
+              />
+            </div>
 
-        <div className="flex gap-3 pt-2">
-          <button
-            type="submit"
-            disabled={mutation.isPending}
-            className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-          >
-            {mutation.isPending ? "Creating..." : "Create Campaign"}
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate("/campaigns")}
-            className="border px-4 py-2 rounded-md text-sm text-gray-600 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-        </div>
-      </form>
+            <Separator />
+
+            <div className="space-y-2">
+              <Label>Recipients</Label>
+              <RecipientPicker
+                selectedIds={selectedIds}
+                onChange={(ids, emails) => {
+                  setSelectedIds(ids);
+                  setSelectedEmails(emails);
+                }}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="schedule-at"
+                className="flex items-center gap-2"
+              >
+                <CalendarClock className="size-4 text-muted-foreground" />
+                Schedule (optional)
+              </Label>
+              <Input
+                id="schedule-at"
+                type="datetime-local"
+                value={scheduleDate}
+                min={minScheduleAt}
+                onChange={(e) => setScheduleDate(e.target.value)}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                {scheduleDate
+                  ? `Will send on ${new Date(scheduleDate).toLocaleString(undefined, {
+                      dateStyle: "full",
+                      timeStyle: "short",
+                    })}`
+                  : "Leave blank to save as a draft. You can schedule later."}
+              </p>
+            </div>
+          </CardContent>
+
+          <CardFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => navigate("/campaigns")}
+              className="w-full sm:w-auto"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={mutation.isPending || selectedEmails.length === 0}
+              className="w-full sm:w-auto"
+            >
+              {mutation.isPending && <Loader2 className="size-4 animate-spin" />}
+              {scheduleDate ? "Schedule campaign" : "Create campaign"}
+            </Button>
+          </CardFooter>
+        </form>
+      </Card>
     </div>
   );
 }

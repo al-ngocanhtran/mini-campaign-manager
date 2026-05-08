@@ -1,8 +1,188 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-body {
-  margin: 0;
-  font-family: system-ui, -apple-system, sans-serif;
-  background: #f9fafb;
-  color: #111827;
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: "Fraunces", ui-serif, Georgia, "Times New Roman", serif;
+  --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+:root {
+  --radius: 0.5rem;
+
+  /* Editorial light — warm off-white, near-black, sharp orange accent */
+  --background: oklch(0.985 0.003 75);          /* stone-50 warm */
+  --foreground: oklch(0.20 0.01 270);           /* near zinc-900 */
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.20 0.01 270);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.20 0.01 270);
+
+  --primary: oklch(0.20 0.01 270);              /* near-black buttons */
+  --primary-foreground: oklch(0.985 0.003 75);
+
+  --secondary: oklch(0.96 0.005 80);
+  --secondary-foreground: oklch(0.20 0.01 270);
+
+  --muted: oklch(0.96 0.005 80);
+  --muted-foreground: oklch(0.44 0.02 260);     /* A11Y-003: 0.50 → 0.44 for ≥4.5:1 on warm bg */
+
+  --accent: oklch(0.62 0.18 40);                /* orange-700 — single sharp accent */
+  --accent-foreground: oklch(0.985 0.003 75);
+
+  --destructive: oklch(0.55 0.22 27);           /* red-600 */
+  --destructive-foreground: oklch(0.985 0.003 75);
+
+  --border: oklch(0.91 0.005 80);
+  --input: oklch(0.91 0.005 80);
+  --ring: oklch(0.20 0.01 270);
+}
+
+.dark {
+  /* Newsroom at night — warm-grey graphite, paper-white text, single sharp accent.
+     Elevation ramp: higher elevation → lighter surface (UX-011 architecture). */
+  --surface-0: oklch(0.16 0.005 80);
+  --surface-1: oklch(0.20 0.005 80);
+  --surface-2: oklch(0.24 0.005 80);
+  --surface-3: oklch(0.28 0.005 80);
+  --surface-4: oklch(0.33 0.005 80);
+
+  --background: var(--surface-0);
+  --foreground: oklch(1 0 0);
+
+  --card: var(--surface-1);
+  --card-foreground: oklch(1 0 0);
+
+  --popover: var(--surface-2);
+  --popover-foreground: oklch(1 0 0);
+
+  --primary: oklch(1 0 0);
+  --primary-foreground: var(--surface-0);
+
+  --secondary: var(--surface-1);
+  --secondary-foreground: oklch(1 0 0);
+
+  --muted: var(--surface-1);
+  --muted-foreground: oklch(0.78 0.01 80);
+
+  --accent: oklch(0.78 0.10 50);
+  --accent-foreground: var(--surface-0);
+
+  --destructive: oklch(0.72 0.13 27);
+  --destructive-foreground: oklch(1 0 0);
+
+  --border: var(--surface-4);
+  --input: var(--surface-4);
+  --ring: oklch(0.78 0.01 80);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body,
+  #root {
+    min-height: 100vh;        /* fallback */
+    min-height: 100dvh;       /* dynamic viewport — accounts for iOS Safari bottom bar */
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-feature-settings: "ss01", "cv11";
+    -webkit-tap-highlight-color: transparent;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-serif);
+    font-feature-settings: "ss01";
+    letter-spacing: -0.015em;
+  }
+  ::selection {
+    background: var(--accent);
+    color: var(--accent-foreground);
+  }
+}
+
+/* Touch devices: bump primary controls to a 44px minimum.
+   Scoped to coarse pointers so desktop layouts stay dense. */
+@media (pointer: coarse) {
+  [data-slot="button"][data-size="default"],
+  [data-slot="button"][data-size="lg"],
+  [data-slot="input"],
+  [data-slot="textarea"] {
+    min-height: 44px;
+  }
+}
+
+/* Editorial dotted-underline crawl — replacement for animate-pulse on the
+   sending state. Dots travel right-to-left under the text. */
+@keyframes editorial-crawl {
+  from { background-position: 0 100%; }
+  to   { background-position: -8px 100%; }
+}
+.status-crawl {
+  background-image: linear-gradient(90deg, currentColor 50%, transparent 50%);
+  background-size: 4px 1px;
+  background-repeat: repeat-x;
+  background-position: 0 100%;
+  animation: editorial-crawl 600ms linear infinite;
+  padding-bottom: 2px;
+}
+
+/* Page-level fetch indicator — a thin accent bar that sweeps across the top
+   while any TanStack Query is fetching or mutating. Same visual family as
+   status-crawl: horizontal motion, accent color, restrained. */
+@keyframes fetch-bar {
+  0%   { transform: translateX(-110%); }
+  100% { transform: translateX(310%); }
+}
+.animate-fetch-bar {
+  animation: fetch-bar 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Honor reduced motion globally — overrides Tailwind's animate-* utilities
+   and any per-component animation set above. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -1,13 +1,17 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Provider } from "react-redux";
-import { store, useAppSelector, useAppDispatch } from "./store";
-import { logout } from "./store/authSlice";
-import { ProtectedRoute } from "./components/ProtectedRoute";
-import { Login } from "./pages/Login";
-import { Campaigns } from "./pages/Campaigns";
-import { CampaignNew } from "./pages/CampaignNew";
-import { CampaignDetail } from "./pages/CampaignDetail";
+
+import { store, useAppSelector } from "@/store";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { ThemeProvider } from "@/components/theme-provider";
+import { AppHeader } from "@/components/AppHeader";
+import { PageFetchBar } from "@/components/PageFetchBar";
+import { Toaster } from "@/components/ui/sonner";
+import { Login } from "@/pages/Login";
+import { Campaigns } from "@/pages/Campaigns";
+import { CampaignNew } from "@/pages/CampaignNew";
+import { CampaignDetail } from "@/pages/CampaignDetail";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -15,27 +19,28 @@ const queryClient = new QueryClient({
 
 function Layout({ children }: { children: React.ReactNode }) {
   const user = useAppSelector((s) => s.auth.user);
-  const dispatch = useAppDispatch();
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {user && (
-        <nav className="bg-white border-b">
-          <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-            <span className="font-bold text-gray-900">Campaign Manager</span>
-            <div className="flex items-center gap-4">
-              <span className="text-sm text-gray-500">{user.email}</span>
-              <button
-                onClick={() => dispatch(logout())}
-                className="text-sm text-red-600 hover:underline"
-              >
-                Sign out
-              </button>
-            </div>
-          </div>
-        </nav>
-      )}
-      <main className="max-w-4xl mx-auto px-4 py-6">{children}</main>
+    <div className="min-h-screen bg-background text-foreground">
+      <PageFetchBar />
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-foreground focus:px-3 focus:py-1.5 focus:text-sm focus:font-medium focus:text-background focus:outline-none focus:ring-2 focus:ring-accent"
+      >
+        Skip to content
+      </a>
+      <AppHeader />
+      <main
+        id="main"
+        tabIndex={-1}
+        className={
+          user
+            ? "mx-auto max-w-6xl px-4 py-6 focus:outline-none sm:px-6 sm:py-10 md:py-14 lg:px-8"
+            : "mx-auto flex min-h-screen max-w-md items-center px-4 pb-[max(2.5rem,env(safe-area-inset-bottom))] pt-[max(2.5rem,env(safe-area-inset-top))] focus:outline-none sm:px-6"
+        }
+      >
+        {children}
+      </main>
     </div>
   );
 }
@@ -77,12 +82,15 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <Provider store={store}>
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
-      </QueryClientProvider>
-    </Provider>
+    <ThemeProvider>
+      <Provider store={store}>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <AppRoutes />
+            <Toaster position="top-right" richColors closeButton />
+          </BrowserRouter>
+        </QueryClientProvider>
+      </Provider>
+    </ThemeProvider>
   );
 }

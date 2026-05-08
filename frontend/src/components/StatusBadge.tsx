@@ -1,18 +1,67 @@
-import type { Campaign } from "../api/client";
+import { cva, type VariantProps } from "class-variance-authority";
 
-const colors: Record<Campaign["status"], string> = {
-  draft: "bg-gray-100 text-gray-700",
-  scheduled: "bg-blue-100 text-blue-700",
-  sending: "bg-amber-100 text-amber-700",
-  sent: "bg-green-100 text-green-700",
-};
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import type { Campaign, Recipient } from "@/api/client";
 
-export function StatusBadge({ status }: { status: Campaign["status"] }) {
+const campaignBadge = cva(
+  "uppercase tracking-[0.10em] text-[11px] font-mono font-medium border",
+  {
+    variants: {
+      status: {
+        draft:
+          "bg-stone-100 text-stone-700 border-stone-200 dark:bg-stone-900 dark:text-stone-300 dark:border-stone-800",
+        scheduled:
+          "bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-900",
+        sending:
+          "bg-amber-50 text-amber-700 border-amber-200 status-crawl dark:bg-amber-950 dark:text-amber-300 dark:border-amber-900",
+        sent:
+          "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900",
+      },
+    },
+  },
+);
+
+type CampaignStatus = Campaign["status"];
+
+export function StatusBadge({
+  status,
+  className,
+}: { status: CampaignStatus } & VariantProps<typeof campaignBadge> & {
+    className?: string;
+  }) {
   return (
-    <span
-      className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium ${colors[status]}`}
-    >
+    <Badge variant="outline" className={cn(campaignBadge({ status }), className)}>
       {status}
-    </span>
+    </Badge>
+  );
+}
+
+const recipientBadge = cva(
+  "uppercase tracking-[0.10em] text-[11px] font-mono font-medium border",
+  {
+    variants: {
+      status: {
+        pending:
+          "bg-muted text-muted-foreground border-border",
+        sent:
+          "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900",
+        failed:
+          "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900",
+      },
+    },
+  },
+);
+
+type RecipientStatus = Recipient["status"];
+
+export function RecipientStatusBadge({
+  status,
+  className,
+}: { status: RecipientStatus; className?: string }) {
+  return (
+    <Badge variant="outline" className={cn(recipientBadge({ status }), className)}>
+      {status}
+    </Badge>
   );
 }

@@ -1,44 +1,100 @@
-import type { CampaignStats } from "../api/client";
+import { Card } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
+import type { CampaignStats } from "@/api/client";
 
-function ProgressBar({ label, value, color }: { label: string; value: number; color: string }) {
+export function StatsDisplay({ stats }: { stats: CampaignStats }) {
   return (
-    <div>
-      <div className="flex justify-between text-sm mb-1">
-        <span className="text-gray-600">{label}</span>
-        <span className="font-medium">{value}%</span>
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border md:grid-cols-4">
+        <StatTile label="Total" value={stats.total} />
+        <StatTile label="Sent" value={stats.sent} tone="emerald" />
+        <StatTile label="Failed" value={stats.failed} tone="rose" />
+        <StatTile label="Opened" value={stats.opened} tone="indigo" />
       </div>
-      <div className="w-full bg-gray-200 rounded-full h-2.5">
-        <div className={`h-2.5 rounded-full ${color}`} style={{ width: `${value}%` }} />
+
+      <Card className="p-6">
+        <RateRow label="Send rate" value={stats.send_rate} />
+        <Separator className="my-5" />
+        <RateRow label="Open rate" value={stats.open_rate} />
+      </Card>
+    </div>
+  );
+}
+
+function StatTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone?: "emerald" | "rose" | "indigo";
+}) {
+  return (
+    <div className="bg-card p-5">
+      <div
+        className={cn(
+          "font-serif text-3xl font-medium leading-none tabular-nums tracking-tight sm:text-4xl",
+          tone === "emerald" && "text-emerald-600 dark:text-emerald-400",
+          tone === "rose" && "text-rose-600 dark:text-rose-400",
+          tone === "indigo" && "text-indigo-600 dark:text-indigo-400",
+        )}
+      >
+        {value}
+      </div>
+      <div className="mt-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+        {label}
       </div>
     </div>
   );
 }
 
-export function StatsDisplay({ stats }: { stats: CampaignStats }) {
+function RateRow({ label, value }: { label: string; value: number }) {
+  const pct = Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-4 gap-4 text-center">
-        <div className="bg-white border rounded-lg p-3">
-          <div className="text-2xl font-bold">{stats.total}</div>
-          <div className="text-xs text-gray-500">Total</div>
+    <div className="flex items-center gap-4">
+      <div className="flex-1 space-y-2">
+        <div className="flex items-baseline justify-between">
+          <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+            {label}
+          </span>
+          <span className="font-serif text-2xl font-medium tabular-nums">
+            {pct.toFixed(0)}
+            <span className="ml-0.5 text-base text-muted-foreground">%</span>
+          </span>
         </div>
-        <div className="bg-white border rounded-lg p-3">
-          <div className="text-2xl font-bold text-green-600">{stats.sent}</div>
-          <div className="text-xs text-gray-500">Sent</div>
-        </div>
-        <div className="bg-white border rounded-lg p-3">
-          <div className="text-2xl font-bold text-red-600">{stats.failed}</div>
-          <div className="text-xs text-gray-500">Failed</div>
-        </div>
-        <div className="bg-white border rounded-lg p-3">
-          <div className="text-2xl font-bold text-blue-600">{stats.opened}</div>
-          <div className="text-xs text-gray-500">Opened</div>
-        </div>
+        <Progress value={pct} className="h-1.5" />
       </div>
-      <div className="space-y-3">
-        <ProgressBar label="Send Rate" value={stats.send_rate} color="bg-green-500" />
-        <ProgressBar label="Open Rate" value={stats.open_rate} color="bg-blue-500" />
-      </div>
+
+      {/* Editorial flourish — appears only on wide screens. Single-orange arc. */}
+      <svg
+        viewBox="0 0 36 36"
+        className="hidden size-9 lg:block"
+        aria-hidden="true"
+      >
+        <circle
+          cx="18"
+          cy="18"
+          r="16"
+          fill="none"
+          stroke="var(--border)"
+          strokeWidth="2"
+        />
+        <circle
+          cx="18"
+          cy="18"
+          r="16"
+          fill="none"
+          stroke="var(--accent)"
+          strokeWidth="2"
+          strokeDasharray={`${pct} 100`}
+          pathLength={100}
+          strokeLinecap="round"
+          transform="rotate(-90 18 18)"
+        />
+      </svg>
     </div>
   );
 }

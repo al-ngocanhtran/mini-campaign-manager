@@ -3,6 +3,17 @@ import { logout } from "../store/authSlice";
 
 const BASE = "";
 
+export class ApiError extends Error {
+  status: number;
+  fields?: Record<string, string>;
+  constructor(message: string, status: number, fields?: Record<string, string>) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.fields = fields;
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = store.getState().auth.token;
 
@@ -21,7 +32,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error || `Request failed: ${res.status}`);
+    const message = body.error || `Request failed: ${res.status}`;
+    throw new ApiError(message, res
+      .status, body.fields);
   }
 
   if (res.status === 204) return undefined as T;
@@ -58,7 +71,10 @@ export const createCampaign = (data: {
 }) =>
   request<Campaign>("/campaigns", { method: "POST", body: JSON.stringify(data) });
 
-export const updateCampaign = (id: number, data: { name?: string; subject?: string; body?: string }) =>
+export const updateCampaign = (
+  id: number,
+  data: { name?: string; subject?: string; body?: string; recipientEmails?: string[] }
+) =>
   request<Campaign>(`/campaigns/${id}`, { method: "PATCH", body: JSON.stringify(data) });
 
 export const deleteCampaign = (id: number) =>
@@ -69,6 +85,9 @@ export const scheduleCampaign = (id: number, scheduled_at: string) =>
     method: "POST",
     body: JSON.stringify({ scheduled_at }),
   });
+
+export const unscheduleCampaign = (id: number) =>
+  request<Campaign>(`/campaigns/${id}/schedule`, { method: "DELETE" });
 
 export const sendCampaign = (id: number) =>
   request<Campaign>(`/campaigns/${id}/send`, { method: "POST" });
