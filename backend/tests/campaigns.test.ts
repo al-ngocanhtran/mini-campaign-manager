@@ -8,6 +8,10 @@ import bcrypt from "bcrypt";
 // Force test DB + secret BEFORE importing app (modules read env on init)
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "test-secret-not-for-production";
+// Auth-flow tests fire >10 requests against /auth/register and /auth/login per
+// run; the dedicated tests/auth-rate-limit.test.ts spec covers the limiter itself
+// in isolation, so we disable it here to keep the existing suite hermetic.
+process.env.RATE_LIMIT_DISABLED = "true";
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ||
   "postgresql://postgres:postgres@localhost:5432/campaign_manager_test";
@@ -23,7 +27,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 let userAId: number;
 let userAToken: string;
 let userBId: number;
-let userBToken: string;
 
 beforeAll(async () => {
   const sql = readFileSync(join(__dirname, "../migrations/001_initial.sql"), "utf-8");
@@ -37,7 +40,6 @@ beforeAll(async () => {
   userAId = userA.id;
   userBId = userB.id;
   userAToken = signToken({ id: userA.id, email: userA.email });
-  userBToken = signToken({ id: userB.id, email: userB.email });
 });
 
 beforeEach(async () => {
@@ -103,22 +105,43 @@ describe("PATCH /campaigns/:id — draft-only edit rule", () => {
     expect(res.body.error).toMatch(/draft/i);
   });
 
-  it("returns 409 when editing a sent campaign", async () => {
-    const id = await createCampaignWith("sent");
+  it("replaces the recipient list on a draft campaign", async () => {
+    const id = await createCampaignWith("draft", userAId, ["old1@x.com", "old2@x.com"]);
     const res = await request(app)
       .patch(`/campaigns/${id}`)
       .set("Authorization", `Bearer ${userAToken}`)
-      .send({ name: "Nope" });
-    expect(res.status).toBe(409);
+      .send({ recipientEmails: ["new1@x.com", "new2@x.com", "new3@x.com"] });
+    expect(res.status).toBe(200);
+
+    const links = await CampaignRecipient.findAll({ where: { campaign_id: id } });
+    expect(links).toHaveLength(3);
+
+    const recipients = await Recipient.findAll({
+      where: { id: links.map((l) => l.recipient_id) },
+    });
+    expect(recipients.map((r) => r.email).sort()).toEqual([
+      "new1@x.com",
+      "new2@x.com",
+      "new3@x.com",
+    ]);
   });
 
-  it("returns 400 on empty payload", async () => {
+  it("returns 400 when recipientEmails is empty", async () => {
     const id = await createCampaignWith("draft");
     const res = await request(app)
       .patch(`/campaigns/${id}`)
       .set("Authorization", `Bearer ${userAToken}`)
-      .send({});
+      .send({ recipientEmails: [] });
     expect(res.status).toBe(400);
+  });
+
+  it("returns 409 when updating recipients on a scheduled campaign", async () => {
+    const id = await createCampaignWith("scheduled");
+    const res = await request(app)
+      .patch(`/campaigns/${id}`)
+      .set("Authorization", `Bearer ${userAToken}`)
+      .send({ recipientEmails: ["new@x.com"] });
+    expect(res.status).toBe(409);
   });
 });
 
@@ -162,7 +185,7 @@ describe("POST /campaigns/:id/schedule — future-date rule", () => {
     expect(res.body.status).toBe("scheduled");
   });
 
-  it("returns 409 if the campaign is not a draft", async () => {
+  it("returns 409 if the campaign is not draft or scheduled", async () => {
     const id = await createCampaignWith("sent");
     const futureIso = new Date(Date.now() + 3600_000).toISOString();
     const res = await request(app)
@@ -170,6 +193,28 @@ describe("POST /campaigns/:id/schedule — future-date rule", () => {
       .set("Authorization", `Bearer ${userAToken}`)
       .send({ scheduled_at: futureIso });
     expect(res.status).toBe(409);
+  });
+
+  it("returns 400 when scheduled_at lacks an explicit timezone offset", async () => {
+    const id = await createCampaignWith("draft");
+    const res = await request(app)
+      .post(`/campaigns/${id}/schedule`)
+      .set("Authorization", `Bearer ${userAToken}`)
+      .send({ scheduled_at: "2099-01-01T10:00:00" }); // naive — no Z, no offset
+    expect(res.status).toBe(400);
+    expect(res.body.fields?.scheduled_at).toMatch(/timezone offset/i);
+  });
+
+  it("reschedules an already-scheduled campaign with a new future timestamp", async () => {
+    const id = await createCampaignWith("scheduled");
+    const futureIso = new Date(Date.now() + 7200_000).toISOString();
+    const res = await request(app)
+      .post(`/campaigns/${id}/schedule`)
+      .set("Authorization", `Bearer ${userAToken}`)
+      .send({ scheduled_at: futureIso });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("scheduled");
+    expect(new Date(res.body.scheduled_at).toISOString()).toBe(futureIso);
   });
 });
 
@@ -191,24 +236,18 @@ describe("POST /campaigns/:id/send — atomic transition", () => {
     }
   });
 
-  it("returns 409 when sent again (atomic CAS gate)", async () => {
-    const id = await createCampaignWith("draft");
-    await request(app).post(`/campaigns/${id}/send`).set("Authorization", `Bearer ${userAToken}`);
-    const second = await request(app)
-      .post(`/campaigns/${id}/send`)
-      .set("Authorization", `Bearer ${userAToken}`);
-    expect(second.status).toBe(409);
-  });
-
-  it("returns 409 when two concurrent sends race", async () => {
+  it("admits exactly one of two concurrent send requests (atomic CAS regression)", async () => {
     const id = await createCampaignWith("draft");
     const [a, b] = await Promise.all([
       request(app).post(`/campaigns/${id}/send`).set("Authorization", `Bearer ${userAToken}`),
       request(app).post(`/campaigns/${id}/send`).set("Authorization", `Bearer ${userAToken}`),
     ]);
+    // Order is racy; the *set* of outcomes is the invariant.
     const statuses = [a.status, b.status].sort();
-    // One must win (200), the other must 409 — never two 200s
     expect(statuses).toEqual([200, 409]);
+
+    const after = await Campaign.findByPk(id);
+    expect(after?.status).toBe("sent");
   });
 });
 
@@ -301,5 +340,206 @@ describe("POST /recipients", () => {
       .set("Authorization", `Bearer ${userAToken}`)
       .send({ email: "dup@example.com" });
     expect(res.status).toBe(409);
+  });
+});
+
+describe("Auth — register + login", () => {
+  it("registers a new user, returns a working JWT, and never exposes the password", async () => {
+    const res = await request(app)
+      .post("/auth/register")
+      .send({ email: "newcomer@test.com", name: "Newcomer", password: "secret-pw-12345" });
+    expect(res.status).toBe(201);
+    expect(res.body.token).toBeTruthy();
+    expect(res.body.user.email).toBe("newcomer@test.com");
+    expect(res.body.user).not.toHaveProperty("password");
+    expect(res.body.user).not.toHaveProperty("password_hash");
+
+    const protectedRes = await request(app)
+      .get("/campaigns")
+      .set("Authorization", `Bearer ${res.body.token}`);
+    expect(protectedRes.status).toBe(200);
+  });
+
+  it("returns 409 when registering an email that already exists", async () => {
+    const res = await request(app)
+      .post("/auth/register")
+      .send({ email: "alice@test.com", name: "Imposter", password: "another-pw-12345" });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/registered|exists/i);
+  });
+
+  it("logs in with correct credentials and returns a usable JWT", async () => {
+    const res = await request(app)
+      .post("/auth/login")
+      .send({ email: "alice@test.com", password: "testpass123" });
+    expect(res.status).toBe(200);
+    expect(res.body.token).toBeTruthy();
+    expect(res.body.user.email).toBe("alice@test.com");
+    expect(res.body.user).not.toHaveProperty("password_hash");
+
+    const protectedRes = await request(app)
+      .get("/campaigns")
+      .set("Authorization", `Bearer ${res.body.token}`);
+    expect(protectedRes.status).toBe(200);
+  });
+
+  it("returns 401 on wrong password and does not leak a token", async () => {
+    const res = await request(app)
+      .post("/auth/login")
+      .send({ email: "alice@test.com", password: "definitely-wrong" });
+    expect(res.status).toBe(401);
+    expect(res.body.token).toBeUndefined();
+  });
+
+  it("rejects register with invalid email and returns a per-field message", async () => {
+    const res = await request(app)
+      .post("/auth/register")
+      .send({ email: "not-an-email", name: "X", password: "long-enough-pw-12345" });
+    expect(res.status).toBe(400);
+    expect(res.body.fields?.email).toMatch(/valid email/i);
+  });
+
+  it("rejects register with a password shorter than 12 chars", async () => {
+    const res = await request(app)
+      .post("/auth/register")
+      .send({ email: "shortpw@test.com", name: "X", password: "short-pw" });
+    expect(res.status).toBe(400);
+    expect(res.body.fields?.password).toMatch(/12 characters/i);
+  });
+
+  it("rejects register with a common password", async () => {
+    const res = await request(app)
+      .post("/auth/register")
+      .send({ email: "common@test.com", name: "X", password: "password1234" });
+    expect(res.status).toBe(400);
+    expect(res.body.fields?.password).toMatch(/too common/i);
+  });
+
+  it("normalizes email on register so login works with any casing or whitespace", async () => {
+    const reg = await request(app)
+      .post("/auth/register")
+      .send({ email: "  Foo@Example.COM  ", name: "Foo", password: "long-enough-pw-12345" });
+    expect(reg.status).toBe(201);
+    expect(reg.body.user.email).toBe("foo@example.com");
+
+    const login = await request(app)
+      .post("/auth/login")
+      .send({ email: "foo@example.com", password: "long-enough-pw-12345" });
+    expect(login.status).toBe(200);
+  });
+
+  it("returns identical 401 body for unknown email vs wrong password (no enumeration leak)", async () => {
+    const unknown = await request(app)
+      .post("/auth/login")
+      .send({ email: "ghost@test.com", password: "any-password-12345" });
+    const wrongPw = await request(app)
+      .post("/auth/login")
+      .send({ email: "alice@test.com", password: "any-password-12345" });
+
+    expect(unknown.status).toBe(401);
+    expect(wrongPw.status).toBe(401);
+    expect(unknown.body).toEqual({ error: "Invalid email or password" });
+    expect(wrongPw.body).toEqual({ error: "Invalid email or password" });
+    expect(unknown.body).toEqual(wrongPw.body);
+    expect(unknown.body).not.toHaveProperty("fields");
+  });
+});
+
+describe("POST /campaigns — transactional create with recipients", () => {
+  it("creates a draft campaign and attaches all recipients in 201", async () => {
+    const res = await request(app)
+      .post("/campaigns")
+      .set("Authorization", `Bearer ${userAToken}`)
+      .send({
+        name: "Launch",
+        subject: "Hello",
+        body: "Welcome",
+        recipientEmails: ["a@example.com", "b@example.com", "c@example.com"],
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe("draft");
+    expect(res.body.created_by).toBe(userAId);
+    expect(res.body.recipient_count).toBe(3);
+
+    const links = await CampaignRecipient.findAll({ where: { campaign_id: res.body.id } });
+    expect(links).toHaveLength(3);
+    const recipients = await Recipient.findAll();
+    expect(recipients.map((r) => r.email).sort()).toEqual([
+      "a@example.com",
+      "b@example.com",
+      "c@example.com",
+    ]);
+  });
+
+  it("returns 400 when recipientEmails is empty", async () => {
+    const res = await request(app)
+      .post("/campaigns")
+      .set("Authorization", `Bearer ${userAToken}`)
+      .send({ name: "X", subject: "Y", body: "Z", recipientEmails: [] });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects an invalid recipient email and writes nothing (no orphan rows)", async () => {
+    const campaignsBefore = await Campaign.count();
+    const recipientsBefore = await Recipient.count();
+
+    const res = await request(app)
+      .post("/campaigns")
+      .set("Authorization", `Bearer ${userAToken}`)
+      .send({
+        name: "Bad",
+        subject: "Subject",
+        body: "Body",
+        recipientEmails: ["valid@example.com", "not-an-email"],
+      });
+
+    expect(res.status).toBe(400);
+    expect(await Campaign.count()).toBe(campaignsBefore);
+    expect(await Recipient.count()).toBe(recipientsBefore);
+  });
+});
+
+describe("Tenant isolation — mutating endpoints", () => {
+  it("returns 404 when User A tries to PATCH User B's draft campaign and leaves it unchanged", async () => {
+    const id = await createCampaignWith("draft", userBId);
+    const res = await request(app)
+      .patch(`/campaigns/${id}`)
+      .set("Authorization", `Bearer ${userAToken}`)
+      .send({ name: "Hijacked" });
+    expect(res.status).toBe(404);
+
+    const after = await Campaign.findByPk(id);
+    expect(after?.name).toBe("Test");
+  });
+
+  it("returns 404 when User A tries to schedule User B's campaign and leaves it unchanged", async () => {
+    const id = await createCampaignWith("draft", userBId);
+    const futureIso = new Date(Date.now() + 3600_000).toISOString();
+    const res = await request(app)
+      .post(`/campaigns/${id}/schedule`)
+      .set("Authorization", `Bearer ${userAToken}`)
+      .send({ scheduled_at: futureIso });
+    expect(res.status).toBe(404);
+
+    const after = await Campaign.findByPk(id);
+    expect(after?.status).toBe("draft");
+    expect(after?.scheduled_at).toBeNull();
+  });
+
+  it("returns 404 when User A tries to send User B's campaign and recipients stay pending", async () => {
+    const id = await createCampaignWith("draft", userBId);
+    const res = await request(app)
+      .post(`/campaigns/${id}/send`)
+      .set("Authorization", `Bearer ${userAToken}`);
+    expect(res.status).toBe(404);
+
+    const after = await Campaign.findByPk(id);
+    expect(after?.status).toBe("draft");
+    const links = await CampaignRecipient.findAll({ where: { campaign_id: id } });
+    expect(links).toHaveLength(3);
+    for (const link of links) {
+      expect(link.status).toBe("pending");
+      expect(link.sent_at).toBeNull();
+    }
   });
 });
