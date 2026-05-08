@@ -21,7 +21,7 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/campaign_manager
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-production}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (run "yarn workspace campaign-manager-backend run generate-jwt-secret" and put the output in .env)}
       PORT: "3001"
       CORS_ORIGIN: http://localhost:5173
       NODE_ENV: development
@@ -35,6 +35,8 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+    environment:
+      VITE_PROXY_TARGET: http://backend:3001
     ports:
       - "5173:5173"
     depends_on:
