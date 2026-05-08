@@ -1,4 +1,6 @@
 import { Request, Response, NextFunction } from "express";
+import { ParamsDictionary } from "express-serve-static-core";
+import { ParsedQs } from "qs";
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -12,7 +14,9 @@ if (!JWT_SECRET) {
 
 const secret = JWT_SECRET || "dev-secret-not-for-production";
 
-export interface AuthRequest extends Request {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export interface AuthRequest<P = ParamsDictionary, ResBody = any, ReqBody = any, ReqQuery = ParsedQs>
+  extends Request<P, ResBody, ReqBody, ReqQuery> {
   user?: { id: number; email: string };
 }
 
