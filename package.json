@@ -8,13 +8,20 @@
     "frontend"
   ],
   "scripts": {
+    "prepare": "husky",
+    "setup": "bash scripts/setup.sh",
     "dev:backend": "yarn workspace campaign-manager-backend run dev",
     "dev:frontend": "yarn workspace frontend run dev",
     "build:frontend": "yarn workspace frontend run build",
     "migrate": "yarn workspace campaign-manager-backend run migrate",
     "seed": "yarn workspace campaign-manager-backend run seed",
     "test": "yarn workspace campaign-manager-backend run test",
-    "lint:frontend": "yarn workspace frontend run lint"
+    "lint": "yarn workspace campaign-manager-backend run lint && yarn workspace frontend run lint",
+    "lint:frontend": "yarn workspace frontend run lint",
+    "typecheck": "yarn workspace campaign-manager-backend run typecheck && yarn workspace frontend run typecheck"
   },
-  "packageManager": "yarn@4.5.0"
+  "packageManager": "yarn@4.5.0",
+  "devDependencies": {
+    "husky": "^9.1.7"
+  }
 }
