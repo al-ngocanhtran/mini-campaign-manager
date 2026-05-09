@@ -37,7 +37,3 @@ Thumbs.db
 
 # Docker volumes (if bind-mounted)
 pgdata/
-
-plans/
-REQUIREMENTS.md
-
