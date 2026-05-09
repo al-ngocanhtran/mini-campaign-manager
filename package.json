@@ -10,18 +10,25 @@
   "scripts": {
     "prepare": "husky",
     "setup": "bash scripts/setup.sh",
+    "start": "bash scripts/start.sh",
+    "stop": "bash scripts/stop.sh",
+    "clean": "bash scripts/clean.sh",
+    "logs": "bash scripts/logs.sh",
+    "dev": "concurrently -n be,fe -c blue,green \"yarn dev:backend\" \"yarn dev:frontend\"",
     "dev:backend": "yarn workspace campaign-manager-backend run dev",
     "dev:frontend": "yarn workspace frontend run dev",
     "build:frontend": "yarn workspace frontend run build",
     "migrate": "yarn workspace campaign-manager-backend run migrate",
     "seed": "yarn workspace campaign-manager-backend run seed",
-    "test": "yarn workspace campaign-manager-backend run test",
+    "db:reset": "bash scripts/db-reset.sh",
+    "test": "bash scripts/test.sh",
     "lint": "yarn workspace campaign-manager-backend run lint && yarn workspace frontend run lint",
     "lint:frontend": "yarn workspace frontend run lint",
     "typecheck": "yarn workspace campaign-manager-backend run typecheck && yarn workspace frontend run typecheck"
   },
   "packageManager": "yarn@4.5.0",
   "devDependencies": {
+    "concurrently": "^9.0.0",
     "husky": "^9.1.7"
   }
 }
