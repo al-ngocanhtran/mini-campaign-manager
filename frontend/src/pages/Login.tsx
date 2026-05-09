@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ModeToggle } from "@/components/mode-toggle";
 import { useAppDispatch } from "@/store";
 import { setCredentials } from "@/store/authSlice";
 import * as api from "@/api/client";
@@ -92,6 +93,10 @@ export function Login() {
 
   return (
     <div className="w-full motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
+      <div className="fixed right-3 top-3 z-50 sm:right-5 sm:top-5">
+        <ModeToggle />
+      </div>
+
       <div className="mb-6 flex items-center justify-center gap-2 font-serif text-xl tracking-tight sm:mb-8">
         <span className="grid size-8 place-items-center rounded-md bg-foreground text-background">
           <Mail className="size-4" strokeWidth={2.5} />
