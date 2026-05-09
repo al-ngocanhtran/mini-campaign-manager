@@ -15,8 +15,11 @@ const { default: app } = await import("../src/index.js");
 const { sequelize } = await import("../src/models/index.js");
 
 beforeAll(async () => {
-  // Ensure the connection is live so failed login attempts don't 500 on first hit.
-  await sequelize.authenticate();
+  // Ensure tables exist so `User.findOne` in the login path doesn't 500. Plain sync
+  // (no force) lets us share a DB with tests/campaigns.test.ts without racing on
+  // DROP+CREATE — the campaigns suite still owns table reset via its own force-sync.
+  // The rate-limit assertions don't depend on row state; they probe nonexistent emails.
+  await sequelize.sync();
 });
 
 afterAll(async () => {
