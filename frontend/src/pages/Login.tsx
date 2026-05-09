@@ -130,10 +130,13 @@ export function Login() {
                 onChange={(e) => setEmail(e.target.value)}
                 onBlur={() => setFieldError("email", validateEmail(email))}
                 aria-invalid={!!fieldErrors.email}
+                aria-describedby={fieldErrors.email ? "email-error" : undefined}
                 placeholder="you@example.com"
               />
               {fieldErrors.email && (
-                <p className="text-xs text-destructive">{fieldErrors.email}</p>
+                <p id="email-error" className="text-xs text-destructive">
+                  {fieldErrors.email}
+                </p>
               )}
             </div>
 
@@ -149,10 +152,13 @@ export function Login() {
                   onChange={(e) => setName(e.target.value)}
                   onBlur={() => setFieldError("name", validateName(name))}
                   aria-invalid={!!fieldErrors.name}
+                  aria-describedby={fieldErrors.name ? "name-error" : undefined}
                   placeholder="Your name"
                 />
                 {fieldErrors.name && (
-                  <p className="text-xs text-destructive">{fieldErrors.name}</p>
+                  <p id="name-error" className="text-xs text-destructive">
+                    {fieldErrors.name}
+                  </p>
                 )}
               </div>
             )}
@@ -173,6 +179,7 @@ export function Login() {
                       : setFieldError("password", password ? null : "Password is required")
                   }
                   aria-invalid={!!fieldErrors.password}
+                  aria-describedby={fieldErrors.password ? "password-error" : undefined}
                   placeholder={isRegister ? "At least 12 characters" : "Your password"}
                   className="pr-10"
                 />
@@ -192,7 +199,9 @@ export function Login() {
                 </button>
               </div>
               {fieldErrors.password && (
-                <p className="text-xs text-destructive">{fieldErrors.password}</p>
+                <p id="password-error" className="text-xs text-destructive">
+                  {fieldErrors.password}
+                </p>
               )}
               {isRegister && !fieldErrors.password && (
                 <p className="text-xs text-muted-foreground">
