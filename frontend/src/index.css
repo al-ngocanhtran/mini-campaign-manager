@@ -68,41 +68,41 @@
 }
 
 .dark {
-  /* Newsroom at night — warm-grey graphite, paper-white text, single sharp accent.
+  /* Newsroom at night — warm graphite, paper off-white text, amber accent matching light mode.
      Elevation ramp: higher elevation → lighter surface (UX-011 architecture). */
-  --surface-0: oklch(0.16 0.005 80);
-  --surface-1: oklch(0.20 0.005 80);
-  --surface-2: oklch(0.24 0.005 80);
-  --surface-3: oklch(0.28 0.005 80);
-  --surface-4: oklch(0.33 0.005 80);
+  --surface-0: oklch(0.205 0.006 70);
+  --surface-1: oklch(0.235 0.006 70);
+  --surface-2: oklch(0.270 0.006 70);
+  --surface-3: oklch(0.310 0.008 70);
+  --surface-4: oklch(0.360 0.008 70);
 
   --background: var(--surface-0);
-  --foreground: oklch(1 0 0);
+  --foreground: oklch(0.955 0.006 80);
 
   --card: var(--surface-1);
-  --card-foreground: oklch(1 0 0);
+  --card-foreground: oklch(0.955 0.006 80);
 
   --popover: var(--surface-2);
-  --popover-foreground: oklch(1 0 0);
+  --popover-foreground: oklch(0.955 0.006 80);
 
-  --primary: oklch(1 0 0);
+  --primary: oklch(0.955 0.006 80);
   --primary-foreground: var(--surface-0);
 
   --secondary: var(--surface-1);
-  --secondary-foreground: oklch(1 0 0);
+  --secondary-foreground: oklch(0.955 0.006 80);
 
   --muted: var(--surface-1);
-  --muted-foreground: oklch(0.78 0.01 80);
+  --muted-foreground: oklch(0.74 0.012 75);
 
-  --accent: oklch(0.78 0.10 50);
+  --accent: oklch(0.78 0.13 45);
   --accent-foreground: var(--surface-0);
 
-  --destructive: oklch(0.72 0.13 27);
-  --destructive-foreground: oklch(1 0 0);
+  --destructive: oklch(0.72 0.15 27);
+  --destructive-foreground: oklch(0.985 0.006 80);
 
-  --border: var(--surface-4);
-  --input: var(--surface-4);
-  --ring: oklch(0.78 0.01 80);
+  --border: var(--surface-3);
+  --input: var(--surface-3);
+  --ring: oklch(0.78 0.13 45);
 }
 
 @layer base {
