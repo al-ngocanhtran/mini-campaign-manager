@@ -1,116 +1,147 @@
 # CLAUDE.md — Project Context for AI Agents
 
-> **READ THIS FILE IN FULL BEFORE PLANNING OR EXECUTING ANY TASK.**
-> It is the single source of truth for this project. Do not begin implementation, scaffolding, or refactoring until you have internalized every section below. If anything here conflicts with a user instruction, surface the conflict explicitly and ask before proceeding.
+> **Read in full before planning or executing any task.** Single source of truth. If anything here conflicts with a user instruction, surface it before proceeding.
 
 ---
 
-## 1. How You Should Operate
+## 1. Project Overview
 
-You are working on this repo as a **senior full-stack engineer** — not a code generator. That means:
+**Mini Campaign Manager** — full-stack MarTech tool to create, schedule, send, and track email campaigns.
 
-- **Think before you type.** Before writing code, produce a short plan: what files will change, what the data flow is, what edge cases exist, and what could break. Share the plan with the user for non-trivial tasks.
-- **Read the codebase before changing it.** Never invent file paths, module names, or existing helpers. If you need to know how something is wired, open the file and check.
-- **Clarify, don't assume.** If the requirement is ambiguous (see §11), ask one sharp question rather than guessing. Silent assumptions that turn into rework are worse than a 10-second pause.
-- **Enforce invariants on the server.** The frontend is a convenience layer, not a security boundary. Every business rule in §6 must be enforced in the API — even if the UI also enforces it.
-- **Design for failure.** Network calls fail, DBs reject writes, JWTs expire, users double-click. Every endpoint and every mutation must have a defined behavior for the unhappy path.
-- **Separate concerns.** Routes handle HTTP, services hold business logic, repositories touch the database, validators guard inputs. Do not let SQL leak into route handlers or business rules leak into React components.
-- **Prefer explicit over clever.** Readable code with obvious data flow beats a terse one-liner. The next engineer reading this (possibly another agent) should not need to reverse-engineer intent.
-- **Test what matters.** Tests should catch real bugs — business-rule violations, auth bypasses, state-transition errors — not just prove that a function returns a value.
-- **Be honest about what you did.** In commits, PR descriptions, and the README's "How I Used Claude Code" section, describe real work, real mistakes, and real corrections. Do not fabricate prompts or paper over issues.
+- Yarn workspaces monorepo (`backend/` + `frontend/`).
+- Local setup: one command (`docker compose up`).
+---
+
+## 2. Tech Stack (Locked)
+
+Do not swap without explicit approval.
+
+| Layer        | Choice                                                               |
+| ------------ | -------------------------------------------------------------------- |
+| Backend      | Node.js + Express                                                    |
+| Database     | PostgreSQL + Sequelize ORM                                           |
+| Auth         | JWT (middleware-based)                                               |
+| Validation   | Zod **or** Joi (pick one, stay consistent)                           |
+| Migrations   | Sequelize, under `backend/migrations/`, forward-only                 |
+| Frontend     | React 18+ + TypeScript, built with Vite                              |
+| Server state | React Query **or** SWR                                               |
+| Client state | Zustand **or** Redux (justify pick in README)                        |
+| Styling      | Tailwind + shadcn/ui (not MUI, not Chakra)                           |
+| Monorepo     | Yarn workspaces — `backend/` + `frontend/` at repo root              |
 
 ---
 
-## 2. Project Overview
+## 3. Architecture & Key Directories
 
-**Mini Campaign Manager** — a full-stack MarTech tool for marketers to create, schedule, send, and track email campaigns.
-
-- **Monorepo** managed with **Yarn workspaces** (backend + frontend in one repo).
-- Time budget: 4–8 hours of focused work.
-- Deliverable: a public GitHub repo plus a written walkthrough.
-- Local setup must be one command, ideally `docker compose up`.
-
----
-
-## 3. Tech Stack (Locked)
-
-Do **not** swap these out without explicit approval.
-
-**Backend**
-- Node.js + **Express**
-- **PostgreSQL** with **Sequelize** (ORM)
-- **JWT** for auth (middleware-based)
-- Input validation with **Zod or Joi** (pick one and stay consistent)
-- Migrations (Sequelize migrations or SQL files)
-
-**Frontend**
-- **React 18+** with **TypeScript**, built with **Vite**
-- **React Query or SWR** for server state
-- **Zustand or Redux** for client state (pick one — Redux is acceptable, Zustand is simpler; justify your pick in the README)
-- Any component library: shadcn/ui, Chakra, MUI, or Tailwind
-
-**Shared**
-- Yarn workspaces monorepo layout (e.g., `packages/backend`, `packages/frontend`, optionally `packages/shared` for types)
-
----
-
-## 4. Repository Layout (Suggested)
+### Backend Architecture
 
 ```
-/
-├── packages/
-│   ├── backend/        # Express API, Sequelize models, migrations, tests
-│   ├── frontend/       # Vite + React + TS app
-│   └── shared/         # (optional) shared types / zod schemas
-├── docker-compose.yml  # postgres + backend + frontend
-├── package.json        # workspaces root
-├── README.md
-└── CLAUDE.md           # this file
+Request → cors → json → Route → auth → validate → Controller → Service → Model → Postgres
+                                                                              ↘ errors → error-handler
 ```
+
+* Routes: own HTTP shape and mount middleware. 
+* Controllers: translate HTTP↔service. 
+* Services:  hold business rules and own transactions. 
+* Models: Sequelize entities with class-based definitions. 
+* `error-handler`: single exit for thrown errors.
+
+
+### Project Structure
+
+```
+mini-campaign-manager/
+├── backend/                          # Express + Sequelize API (:3001)
+│   ├── src/
+│   │   ├── index.ts                  # app entry, route mounting, error handler
+│   │   ├── db.ts                     # Sequelize instance
+│   │   ├── config/                   # env loading (single source of truth)
+│   │   ├── models/                   # User, Campaign, Recipient, CampaignRecipient
+│   │   ├── routes/*.routes.ts        # HTTP shape + middleware mounting
+│   │   ├── controllers/*.controller.ts  # req → service → res, no status logic
+│   │   ├── services/*.service.ts     # business rules + transactions; throws HttpError
+│   │   ├── middleware/               # auth, validate(schema, source), error-handler
+│   │   ├── errors/http.ts            # HttpError + NotFound/Conflict/Unprocessable/etc.
+│   │   └── validation/schemas.ts     # Zod request schemas
+│   ├── migrations/*.cjs              # sequelize-cli, forward-only, one table per file
+│   ├── seeders/                      # demo user + recipients + bulk sample campaigns
+│   ├── config/config.cjs             # sequelize-cli env config
+│   ├── eslint.config.js              # flat-config + layer-boundary rule
+│   └── tests/                        # Vitest + supertest (auth, campaigns, recipients, rate-limit)
+│
+├── frontend/                         # React 19 + Vite (:5173)
+│   ├── src/
+│   │   ├── App.tsx                   # router, providers, query client
+│   │   ├── api/client.ts             # only place fetch is called; auto-injects JWT, 401 → logout
+│   │   ├── store/                    # Redux Toolkit auth slice (token + user only)
+│   │   ├── pages/                    # Login, Campaigns, CampaignNew, CampaignDetail
+│   │   ├── components/               # AppHeader, RecipientPicker, StatusBadge, …
+│   │   │   └── ui/                   # shadcn primitives (generated, lint-ignored)
+│   │   ├── lib/                      # validators, utils, hooks
+│   │   └── index.css                 # Tailwind v4 + light/dark token blocks
+│   ├── components.json               # shadcn registry config
+│   └── vite.config.ts                # dev proxy + HTML-bypass for SPA reloads
+│
+├── scripts/                          # setup, start, stop, logs, clean, db-reset, test wrappers
+├── plans/                            # gap tracker (plans/README.md) + execution plans
+├── .claude/                          # project-local Stop hook for plans/README.md
+├── .husky/                           # yarn lint && yarn typecheck before push
+├── docker-compose.yml                # postgres + backend + frontend
+└── package.json                      # yarn workspaces + aggregate lint/typecheck/test
+```
+
+---
+---
+
+## 4. Database Conventions
+
+- **Parameterized queries only.** Sequelize methods or `sequelize.query(..., { replacements })`. Never interpolate user input.
+- **Migrations are forward-only.** One change per numbered file. Never edit a migration that has run — write a new one.
+- **Wrap multi-statement writes in a transaction** (`sequelize.transaction(async (t) => ...)`) and pass `{ transaction: t }` to every call inside.
+- **Schema rules.** `snake_case` columns/tables, plural table names. Mutable rows have `id`/`created_at`/`updated_at`. FKs enforced at DB level. Timestamps `TIMESTAMPTZ` (UTC).
+- **Index intentionally.** Index columns hit in `WHERE`/`ORDER BY`/`JOIN` on hot paths. No speculative indexes.
 
 ---
 
 ## 5. Data Model
 
-Mandatory tables — you may add more if justified.
-
 - **User** — `id`, `email` (unique), `name`, `password_hash`, `created_at`
-- **Campaign** — `id`, `name`, `subject`, `body` (text), `status` (`draft` | `sending` | `scheduled` | `sent`), `scheduled_at` (nullable), `created_by` (FK → User), `created_at`, `updated_at`
+- **Campaign** — `id`, `name`, `subject`, `body`, `status` (`draft`|`sending`|`scheduled`|`sent`), `scheduled_at` (nullable), `created_by` (FK User), `created_at`, `updated_at`
 - **Recipient** — `id`, `email` (unique), `name`, `created_at`
-- **CampaignRecipient** — `campaign_id` (FK), `recipient_id` (FK), `sent_at` (nullable), `opened_at` (nullable), `status` (`pending` | `sent` | `failed`)
+- **CampaignRecipient** — `campaign_id`, `recipient_id`, `sent_at` (nullable), `opened_at` (nullable), `status` (`pending`|`sent`|`failed`)
 
-**Indexing** — add and be able to explain, at minimum:
-- Unique index on `users.email` and `recipients.email`
-- Index on `campaigns.created_by` (list-by-user queries)
-- Index on `campaigns.status` and `campaigns.scheduled_at` (scheduler scans)
-- Composite primary key or unique index on `(campaign_id, recipient_id)` in `CampaignRecipient`
-- Index on `campaign_recipients.campaign_id` for stats aggregation
+**Required indexes**
+- Unique on `users.email`, `recipients.email`
+- `campaigns.created_by` (list-by-user)
+- `campaigns.status`, `campaigns.scheduled_at` (scheduler scans)
+- Composite PK or unique on `(campaign_id, recipient_id)`
+- `campaign_recipients.campaign_id` (stats aggregation)
 
-Password must be hashed (bcrypt/argon2) — never stored in plaintext, never returned over the wire.
+Passwords hashed (bcrypt/argon2). Never plaintext, never returned over the wire.
 
 ---
 
 ## 6. API Contract (REST)
 
-All `/campaigns` and `/recipients` routes require a valid JWT. Return appropriate status codes (`400`, `401`, `403`, `404`, `409`, `422`) — don't return `500` for client-caused errors, and don't return `200` for failures.
+All `/campaigns` and `/recipients` routes require a valid JWT. Use correct status codes (`400`/`401`/`403`/`404`/`409`/`422`) — no `500` for client errors, no `200` for failures.
 
 **Auth**
 - `POST /auth/register` — create user
 - `POST /auth/login` — return JWT
 
 **Recipients**
-- `GET /recipients` — list recipients
-- `POST /recipients` — create recipient
+- `GET /recipients` — list
+- `POST /recipients` — create
 
 **Campaigns**
 - `GET /campaigns` — list (paginated)
-- `POST /campaigns` — create (starts as `draft`)
-- `GET /campaigns/:id` — detail + recipient stats
-- `PATCH /campaigns/:id` — update (**only if `status === 'draft'`**)
-- `DELETE /campaigns/:id` — delete (**only if `status === 'draft'`**)
-- `POST /campaigns/:id/schedule` — set `scheduled_at` and transition to `scheduled`
-- `POST /campaigns/:id/send` — simulate **asynchronous** send; each recipient is marked `sent` or `failed` (randomized to simulate real-world delivery)
-- `GET /campaigns/:id/stats` — return the stats shape below
+- `POST /campaigns` — create (starts `draft`)
+- `GET /campaigns/:id` — detail + stats
+- `PATCH /campaigns/:id` — update (**only if `draft`**)
+- `DELETE /campaigns/:id` — delete (**only if `draft`**)
+- `POST /campaigns/:id/schedule` — set `scheduled_at`, transition to `scheduled`
+- `POST /campaigns/:id/send` — async send; each recipient marked `sent` or `failed` (randomized)
+- `GET /campaigns/:id/stats` — see shape below
 
 **Stats response shape**
 
@@ -119,104 +150,73 @@ All `/campaigns` and `/recipients` routes require a valid JWT. Return appropriat
 ```
 
 - `send_rate = sent / total`
-- `open_rate = opened / sent` (guard against divide-by-zero; return `0` when `sent === 0`)
+- `open_rate = opened / sent` — return `0` when `sent === 0`
 
 ---
 
-## 7. Business Rules (Enforce Server-Side, Always)
-
-- A campaign can only be **edited** or **deleted** when `status === 'draft'`. Attempts otherwise → `409 Conflict`.
-- `scheduled_at` must be a **future** timestamp. Past timestamps → `422`.
-- Sending is **one-way**: once a campaign reaches `sent`, it cannot be reverted.
-- The send pipeline should transition: `draft | scheduled` → `sending` → `sent`. Do not skip `sending` if you model async work.
-- Users can only access campaigns they created (`created_by === req.user.id`). Cross-tenant access → `404` (prefer 404 over 403 to avoid leaking existence).
-- Wrap multi-step writes (e.g., create campaign + attach recipients) in a **transaction**.
-- Validate every payload with Zod/Joi before it reaches the service layer.
-
----
-
-## 8. Frontend Requirements
+## 7. Frontend Requirements
 
 **Pages**
-- `/login` — form; store JWT in memory or httpOnly cookie (prefer httpOnly cookie if you can wire it cleanly; document the choice)
+- `/login` — form; JWT in memory or httpOnly cookie (prefer httpOnly; document the pick)
 - `/campaigns` — list with status badges, pagination or infinite scroll
 - `/campaigns/new` — create form (name, subject, body, recipient emails)
-- `/campaigns/:id` — detail view: stats, recipient list, action buttons
+- `/campaigns/:id` — detail: stats, recipient list, action buttons
 
 **UI rules**
-- Status badges: `draft` = grey, `scheduled` = blue, `sending` = amber (add this — requirements imply it), `sent` = green
-- Action buttons (Schedule, Send, Delete) are conditionally rendered based on current `status`
-- Stats as a progress bar or simple chart (open rate and send rate)
-- **Loading states** everywhere (skeletons or spinners) — no blank screens during fetch
-- **Error states** everywhere — surface API error messages meaningfully; never show a raw stack trace
-- Use React Query/SWR cache invalidation properly after mutations — don't force page reloads
+- Status badges: `draft`=grey, `scheduled`=blue, `sending`=amber, `sent`=green
+- Action buttons conditionally rendered by `status`
+- Stats as progress bar or simple chart
+- Loading states everywhere (skeletons/spinners) — no blank screens
+- Error states everywhere — surface API messages, never raw stack traces
+- React Query/SWR cache invalidation after mutations — no page reloads
 
 ---
 
-## 9. Testing Requirements
+## 8. Testing Requirements
 
-Minimum: **3 meaningful tests** for critical business logic. "Meaningful" = would fail if a real regression were introduced. Good candidates:
+Minimum **3 meaningful tests** — would fail on real regression. Good candidates:
 
-1. Cannot edit/delete a campaign once `status !== 'draft'` (expect `409`)
-2. `scheduled_at` in the past is rejected (expect `422`)
-3. `/stats` computes rates correctly, including the `sent === 0` divide-by-zero case
+1. Edit/delete blocked once `status !== 'draft'` (`409`)
+2. Past `scheduled_at` rejected (`422`)
+3. `/stats` rates correct, including `sent === 0` divide-by-zero
 4. (Bonus) JWT middleware rejects missing/expired/malformed tokens
 5. (Bonus) User A cannot read/modify User B's campaign
 
-Keep tests hermetic — use a test database or transactions that roll back.
+Hermetic tests — test DB or rolled-back transactions. Frontend runs on host, not container (container bakes source at build).
 
 ---
 
-## 10. AI Usage Documentation (Required in README)
+## 9. How You Operate (Rules + Checklist + Done)
 
-The README must include a section titled **"How I Used Claude Code"** with:
+You are a **senior full-stack engineer**, not a code generator.
 
-1. What tasks you delegated to Claude Code
-2. 2–3 real prompts you used (verbatim)
-3. Where Claude Code was wrong and needed correction
-4. What you would not let Claude Code do — and why
+**Working rules**
+- **Plan before coding.** For non-trivial tasks, share a short plan: files touched, data flow, edge cases, failure modes.
+- **Read before changing.** Never invent paths, modules, or helpers — open the file.
+- **Clarify, don't assume.** One sharp question beats silent rework.
+- **Server enforces invariants.** Frontend is convenience, not a security boundary. Business rules must be enforced in the API.
+- **Design for failure.** Define unhappy paths for every endpoint and mutation.
+- **Separate concerns.** Routes = HTTP. Services = business logic. Models = DB. Validators = inputs. No SQL in routes, no business rules in components.
+- **Explicit over clever.** Readable, obvious data flow.
+- **Test what matters.** Real bugs — rule violations, auth bypasses, state errors — not return-value smoke tests.
+- **Be honest in commits/PRs.** Real work, real mistakes, real corrections.
+- **Coding conventions.** Strict TypeScript (no `any`, no unjustified `as`). PascalCase components/types, camelCase functions/vars, kebab-case filenames with load-bearing suffixes (`*.routes.ts`, `*.service.ts`, `*.test.ts`). Comments only when *why* is non-obvious — never narrate *what*.
 
-Be truthful. Fabricated prompts or whitewashed corrections defeat the purpose of this section.
+**Pre-task checklist (run in your head)**
+1. Re-read this file if it's been a while.
+2. Which sections does this touch?
+3. Which §4 conventions apply?
+4. Smallest change that satisfies the requirement?
+5. What test proves it works?
+6. What can break, and how do you handle it?
 
----
-
-## 11. Known Ambiguities — Resolve Before Coding
-
-Flag these to the user if unresolved:
-
-1. **`opened_at` mechanism.** No endpoint exists to mark a recipient as "opened." Decide: seed some randomly during `/send` simulation, or add a `POST /campaigns/:id/recipients/:rid/open` tracking endpoint? Document the choice.
-2. **Async send simulation.** "Asynchronous" could mean a background worker, a `setTimeout` queue, or a simple `Promise.all` with artificial delay. The simplest honest option is an in-process job — document whatever you pick and note how it would scale to a real queue (BullMQ, pg-boss).
-3. **Recipient attachment on campaign create.** The create form accepts "recipient emails" — decide whether unknown emails auto-create `Recipient` rows or require prior registration via `POST /recipients`.
-4. **JWT storage.** In-memory (simpler, lost on refresh) vs httpOnly cookie (survives refresh, needs CSRF handling). Pick one and justify.
-5. **State library.** Zustand or Redux — Zustand is lower-overhead for this scope; Redux is fine if you want to demonstrate it. Either is acceptable; don't use both.
-
----
-
-## 12. Definition of Done
-
-A task is not done until:
-
-- [ ] Business rules enforced server-side and covered by at least one test where applicable
-- [ ] All endpoints return correct status codes and response shapes
-- [ ] Inputs validated with Zod/Joi before hitting services
-- [ ] Loading and error states implemented on every screen that fetches
-- [ ] `docker compose up` brings up Postgres, backend, and frontend cleanly
-- [ ] Seed script or demo data available
-- [ ] README covers setup, architecture choices, and the "How I Used Claude Code" section
-- [ ] No secrets, tokens, or `.env` files committed
-- [ ] Linter and type-checker are clean
-
----
-
-## 13. Before You Start Any Task
-
-Run this checklist in your head:
-
-1. Have I read this CLAUDE.md recently? If not, re-read it.
-2. What section(s) of the requirements does this task touch?
-3. What invariants from §7 apply?
-4. What's the smallest change that satisfies the requirement?
-5. What will I test to prove it works?
-6. What could break, and how will I handle it?
-
-Only then: write code.
+**Definition of done**
+- [ ] Business rules enforced server-side, covered by a test where applicable
+- [ ] Endpoints return correct status codes and response shapes
+- [ ] Inputs validated with Zod/Joi before reaching services
+- [ ] Loading + error states on every screen that fetches
+- [ ] `docker compose up` brings up Postgres + backend + frontend cleanly
+- [ ] Seed/demo data available
+- [ ] README covers setup + architecture choices
+- [ ] No secrets or `.env` committed
+- [ ] Lint + typecheck clean; relevant tests run for backend changes
