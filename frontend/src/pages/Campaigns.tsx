@@ -91,6 +91,9 @@ export function Campaigns() {
                     Recipients
                   </TableHead>
                   <TableHead className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                    Created by
+                  </TableHead>
+                  <TableHead className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
                     Scheduled
                   </TableHead>
                   <TableHead className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
@@ -143,11 +146,8 @@ export function Campaigns() {
 }
 
 function CampaignRow({ campaign: c }: { campaign: Campaign }) {
-  // Row-as-link pattern: only the name cell holds the <Link>, but its ::before
-  // pseudo-element overlays the whole row so the entire row is a click target
-  // with a single focusable element. Other cells use `relative` so their
-  // content stays clickable on top of the overlay where useful (e.g. the badge
-  // remains a regular text node — clicks still hit the row link).
+  // Row-as-link: the name cell holds the <Link> and its ::before overlay spans
+  // the whole row, so any cell click navigates with a single focusable element.
   return (
     <TableRow className="group relative cursor-pointer transition-colors hover:bg-muted/40 focus-within:bg-muted/40">
       <TableCell>
@@ -166,13 +166,14 @@ function CampaignRow({ campaign: c }: { campaign: Campaign }) {
           {c.subject}
         </div>
       </TableCell>
-      <TableCell className="relative">
+      <TableCell>
         <StatusBadge status={c.status} />
       </TableCell>
-      <TableCell className="relative font-mono text-sm tabular-nums">
+      <TableCell className="font-mono text-sm tabular-nums">
         {c.recipient_count ?? 0}
       </TableCell>
-      <TableCell className="relative font-mono text-xs text-muted-foreground tabular-nums">
+      <TableCell className="text-sm">{c.creator.name}</TableCell>
+      <TableCell className="font-mono text-xs text-muted-foreground tabular-nums">
         {c.scheduled_at
           ? new Date(c.scheduled_at).toLocaleString(undefined, {
               dateStyle: "medium",
@@ -180,12 +181,12 @@ function CampaignRow({ campaign: c }: { campaign: Campaign }) {
             })
           : "—"}
       </TableCell>
-      <TableCell className="relative font-mono text-xs text-muted-foreground tabular-nums">
+      <TableCell className="font-mono text-xs text-muted-foreground tabular-nums">
         {new Date(c.created_at).toLocaleDateString(undefined, {
           dateStyle: "medium",
         })}
       </TableCell>
-      <TableCell className="relative">
+      <TableCell>
         <Chevron className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
       </TableCell>
     </TableRow>
@@ -233,7 +234,7 @@ function CampaignCard({
       </p>
       <div className="mt-3 flex items-center justify-between border-t border-border/60 pt-3">
         <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-          {c.recipient_count ?? 0} recipients
+          {c.recipient_count ?? 0} recipients · {c.creator.name}
         </span>
         <Chevron className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
       </div>

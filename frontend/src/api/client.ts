@@ -86,9 +86,6 @@ export const scheduleCampaign = (id: number, scheduled_at: string) =>
     body: JSON.stringify({ scheduled_at }),
   });
 
-export const unscheduleCampaign = (id: number) =>
-  request<Campaign>(`/campaigns/${id}/schedule`, { method: "DELETE" });
-
 export const sendCampaign = (id: number) =>
   request<Campaign>(`/campaigns/${id}/send`, { method: "POST" });
 
@@ -120,6 +117,7 @@ export interface Campaign {
   status: "draft" | "scheduled" | "sending" | "sent";
   scheduled_at: string | null;
   created_by: number;
+  creator: { id: number; name: string; email: string };
   created_at: string;
   updated_at: string;
   recipient_count?: number;
