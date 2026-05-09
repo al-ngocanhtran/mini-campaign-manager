@@ -1,7 +1,13 @@
 import { QueryTypes } from "sequelize";
 import { sequelize } from "../db.js";
-import { Campaign, Recipient, CampaignRecipient } from "../models/index.js";
+import { Campaign, Recipient, CampaignRecipient, User } from "../models/index.js";
 import { NotFoundError, ConflictError, UnprocessableError } from "../errors/http.js";
+
+const creatorInclude = {
+  model: User,
+  as: "creator" as const,
+  attributes: ["id", "name", "email"],
+};
 
 export type CreateCampaignInput = {
   name: string;
@@ -14,17 +20,19 @@ export type UpdateCampaignInput = Partial<Omit<CreateCampaignInput, "recipientEm
   recipientEmails?: string[];
 };
 
-export async function listCampaigns(userId: number, page: number, limit: number) {
+export async function listCampaigns(page: number, limit: number) {
   const offset = (page - 1) * limit;
   const result = await Campaign.findAndCountAll({
-    where: { created_by: userId },
-    include: [{ model: CampaignRecipient, as: "recipientLinks", attributes: [] }],
+    include: [
+      { model: CampaignRecipient, as: "recipientLinks", attributes: [] },
+      creatorInclude,
+    ],
     attributes: {
       include: [
         [sequelize.fn("COUNT", sequelize.col("recipientLinks.recipient_id")), "recipient_count"],
       ],
     },
-    group: ["Campaign.id"],
+    group: ["Campaign.id", "creator.id"],
     order: [["created_at", "DESC"]],
     limit,
     offset,
@@ -55,11 +63,15 @@ export async function createCampaign(userId: number, input: CreateCampaignInput)
     return campaign;
   });
 
+  await created.reload({ include: [creatorInclude] });
   return { ...created.toJSON(), recipient_count: uniqueEmails.length };
 }
 
-export async function getCampaign(userId: number, id: number) {
-  const campaign = await Campaign.findOne({ where: { id, created_by: userId } });
+export async function getCampaign(id: number) {
+  const campaign = await Campaign.findOne({
+    where: { id },
+    include: [creatorInclude],
+  });
   if (!campaign) throw new NotFoundError("Campaign not found");
 
   const recipients = await sequelize.query<{
@@ -78,11 +90,11 @@ export async function getCampaign(userId: number, id: number) {
     { replacements: { campaignId: campaign.id }, type: QueryTypes.SELECT },
   );
 
-  return { ...campaign.toJSON(), recipients };
+  return { ...campaign.toJSON(), recipient_count: recipients.length, recipients };
 }
 
-export async function updateCampaign(userId: number, id: number, input: UpdateCampaignInput) {
-  const campaign = await Campaign.findOne({ where: { id, created_by: userId } });
+export async function updateCampaign(id: number, input: UpdateCampaignInput) {
+  const campaign = await Campaign.findOne({ where: { id } });
   if (!campaign) throw new NotFoundError("Campaign not found");
   if (campaign.status !== "draft") throw new ConflictError("Only draft campaigns can be edited");
 
@@ -114,42 +126,44 @@ export async function updateCampaign(userId: number, id: number, input: UpdateCa
     }
   });
 
+  await campaign.reload({ include: [creatorInclude] });
   return campaign;
 }
 
-export async function deleteCampaign(userId: number, id: number) {
-  const campaign = await Campaign.findOne({ where: { id, created_by: userId } });
+export async function deleteCampaign(id: number) {
+  const campaign = await Campaign.findOne({ where: { id } });
   if (!campaign) throw new NotFoundError("Campaign not found");
   if (campaign.status !== "draft") throw new ConflictError("Only draft campaigns can be deleted");
   await campaign.destroy();
 }
 
-export async function scheduleCampaign(userId: number, id: number, scheduledAt: Date) {
+export async function scheduleCampaign(id: number, scheduledAt: Date) {
   if (scheduledAt <= new Date()) {
     throw new UnprocessableError("scheduled_at must be a future timestamp");
   }
-  const campaign = await Campaign.findOne({ where: { id, created_by: userId } });
+  const campaign = await Campaign.findOne({ where: { id } });
   if (!campaign) throw new NotFoundError("Campaign not found");
   if (campaign.status !== "draft") {
     throw new ConflictError("Only draft campaigns can be scheduled");
   }
   await campaign.update({ status: "scheduled", scheduled_at: scheduledAt });
+  await campaign.reload({ include: [creatorInclude] });
   return campaign;
 }
 
-export async function sendCampaign(userId: number, id: number) {
+export async function sendCampaign(id: number) {
   // Atomic CAS on status gate prevents double-send races.
   await sequelize.transaction(async (t) => {
     const [casRows] = await sequelize.query<{ id: number; status: string }>(
       `UPDATE campaigns
           SET status = 'sending', updated_at = NOW()
-        WHERE id = :id AND created_by = :userId AND status IN ('draft', 'scheduled')
+        WHERE id = :id AND status IN ('draft', 'scheduled')
         RETURNING id, status`,
-      { replacements: { id, userId }, type: QueryTypes.SELECT, transaction: t },
+      { replacements: { id }, type: QueryTypes.SELECT, transaction: t },
     );
     if (!casRows) {
       const existing = await Campaign.findOne({
-        where: { id, created_by: userId },
+        where: { id },
         transaction: t,
       });
       if (!existing) throw new NotFoundError("Campaign not found");
@@ -178,12 +192,12 @@ export async function sendCampaign(userId: number, id: number) {
     );
   });
 
-  return await Campaign.findByPk(id);
+  return await Campaign.findByPk(id, { include: [creatorInclude] });
 }
 
-export async function getCampaignStats(userId: number, id: number) {
+export async function getCampaignStats(id: number) {
   const campaign = await Campaign.findOne({
-    where: { id, created_by: userId },
+    where: { id },
     attributes: ["id"],
   });
   if (!campaign) throw new NotFoundError("Campaign not found");

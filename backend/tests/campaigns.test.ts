@@ -22,7 +22,6 @@ const { signToken } = await import("../src/middleware/auth.js");
 
 let userAId: number;
 let userAToken: string;
-let userBId: number;
 
 beforeAll(async () => {
   // Tests own the schema: sync from models for speed instead of running sequelize-cli migrations.
@@ -30,9 +29,7 @@ beforeAll(async () => {
 
   const hash = await bcrypt.hash("testpass123", 4);
   const userA = await User.create({ email: "alice@test.com", name: "Alice", password_hash: hash });
-  const userB = await User.create({ email: "bob@test.com", name: "Bob", password_hash: hash });
   userAId = userA.id;
-  userBId = userB.id;
   userAToken = signToken({ id: userA.id, email: userA.email });
 });
 
@@ -271,24 +268,6 @@ describe("GET /campaigns/:id/stats", () => {
   });
 });
 
-describe("Tenant isolation", () => {
-  it("returns 404 when accessing another user's campaign", async () => {
-    const id = await createCampaignWith("draft", userBId);
-    const res = await request(app)
-      .get(`/campaigns/${id}`)
-      .set("Authorization", `Bearer ${userAToken}`);
-    expect(res.status).toBe(404);
-  });
-
-  it("returns 404 when deleting another user's campaign", async () => {
-    const id = await createCampaignWith("draft", userBId);
-    const res = await request(app)
-      .delete(`/campaigns/${id}`)
-      .set("Authorization", `Bearer ${userAToken}`);
-    expect(res.status).toBe(404);
-  });
-});
-
 describe("POST /campaigns — transactional create with recipients", () => {
   it("creates a draft campaign and attaches all recipients in 201", async () => {
     const res = await request(app)
@@ -343,47 +322,39 @@ describe("POST /campaigns — transactional create with recipients", () => {
   });
 });
 
-describe("Tenant isolation — mutating endpoints", () => {
-  it("returns 404 when User A tries to PATCH User B's draft campaign and leaves it unchanged", async () => {
-    const id = await createCampaignWith("draft", userBId);
+
+describe("creator info on campaign reads", () => {
+  it("returns creator { id, name, email } on GET /campaigns", async () => {
+    await createCampaignWith("draft");
     const res = await request(app)
-      .patch(`/campaigns/${id}`)
-      .set("Authorization", `Bearer ${userAToken}`)
-      .send({ name: "Hijacked" });
-    expect(res.status).toBe(404);
-
-    const after = await Campaign.findByPk(id);
-    expect(after?.name).toBe("Test");
-  });
-
-  it("returns 404 when User A tries to schedule User B's campaign and leaves it unchanged", async () => {
-    const id = await createCampaignWith("draft", userBId);
-    const futureIso = new Date(Date.now() + 3600_000).toISOString();
-    const res = await request(app)
-      .post(`/campaigns/${id}/schedule`)
-      .set("Authorization", `Bearer ${userAToken}`)
-      .send({ scheduled_at: futureIso });
-    expect(res.status).toBe(404);
-
-    const after = await Campaign.findByPk(id);
-    expect(after?.status).toBe("draft");
-    expect(after?.scheduled_at).toBeNull();
-  });
-
-  it("returns 404 when User A tries to send User B's campaign and recipients stay pending", async () => {
-    const id = await createCampaignWith("draft", userBId);
-    const res = await request(app)
-      .post(`/campaigns/${id}/send`)
+      .get("/campaigns")
       .set("Authorization", `Bearer ${userAToken}`);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
+    expect(res.body.campaigns[0].creator).toEqual({
+      id: userAId,
+      name: "Alice",
+      email: "alice@test.com",
+    });
+  });
 
-    const after = await Campaign.findByPk(id);
-    expect(after?.status).toBe("draft");
-    const links = await CampaignRecipient.findAll({ where: { campaign_id: id } });
-    expect(links).toHaveLength(3);
-    for (const link of links) {
-      expect(link.status).toBe("pending");
-      expect(link.sent_at).toBeNull();
-    }
+  it("returns creator { id, name, email } on GET /campaigns/:id", async () => {
+    const id = await createCampaignWith("draft");
+    const res = await request(app)
+      .get(`/campaigns/${id}`)
+      .set("Authorization", `Bearer ${userAToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.creator).toEqual({
+      id: userAId,
+      name: "Alice",
+      email: "alice@test.com",
+    });
+  });
+
+  it("does not leak password_hash on creator", async () => {
+    await createCampaignWith("draft");
+    const res = await request(app)
+      .get("/campaigns")
+      .set("Authorization", `Bearer ${userAToken}`);
+    expect(res.body.campaigns[0].creator).not.toHaveProperty("password_hash");
   });
 });
