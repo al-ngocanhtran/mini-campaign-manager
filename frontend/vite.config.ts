@@ -7,8 +7,7 @@ import tailwindcss from "@tailwindcss/vite";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const target = "http://localhost:3001";
-
+const target = process.env.VITE_PROXY_TARGET ?? "http://localhost:3001";
 // Backend mounts API routes at the same prefixes the SPA uses (/campaigns, ...).
 // Without this bypass, reloading on a SPA route would proxy the browser
 // navigation to the backend and surface a raw 401 instead of the app shell.
