@@ -1,5 +1,6 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
+import { config } from "../config/index.js";
 import { validate } from "../middleware/validate.js";
 import { registerSchema, loginSchema } from "../validation/schemas.js";
 import * as ctrl from "../controllers/auth.controller.js";
@@ -14,7 +15,7 @@ const authLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: false,
   message: { error: "Too many attempts, try again later" },
-  skip: () => process.env.RATE_LIMIT_DISABLED === "true",
+  skip: () => config.rateLimitDisabled,
 });
 
 const router = Router();
