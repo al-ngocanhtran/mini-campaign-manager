@@ -4,7 +4,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   CalendarClock,
-  CalendarX,
   ChevronDown,
   ChevronUp,
   Loader2,
@@ -170,19 +169,6 @@ export function CampaignDetail() {
     },
     onError: (err: Error) =>
       toast.error("Couldn't save", { description: err.message }),
-  });
-
-  const unscheduleMutation = useMutation({
-    mutationFn: () => api.unscheduleCampaign(campaignId),
-    onSuccess: () => {
-      invalidate();
-      setScheduleDate("");
-      toast.success("Schedule cancelled", {
-        description: "Campaign is back to draft.",
-      });
-    },
-    onError: (err: Error) =>
-      toast.error("Couldn't cancel schedule", { description: err.message }),
   });
 
   if (isLoading) return <DetailSkeleton />;
@@ -461,18 +447,11 @@ export function CampaignDetail() {
                   )}
 
                   {canSend && (
-                    <Button
-                      className="w-full"
-                      onClick={() => sendMutation.mutate()}
-                      disabled={sendMutation.isPending}
-                    >
-                      {sendMutation.isPending ? (
-                        <Loader2 className="size-4 animate-spin" />
-                      ) : (
-                        <Send className="size-4" />
-                      )}
-                      Send now
-                    </Button>
+                    <SendDialog
+                      campaignName={campaign.name}
+                      pending={sendMutation.isPending}
+                      onConfirm={() => sendMutation.mutate()}
+                    />
                   )}
 
                   {sendMutation.isPending && (
@@ -481,13 +460,13 @@ export function CampaignDetail() {
                     </p>
                   )}
 
-                  {canSend && (
+                  {isDraft && (
                     <div className="space-y-2">
                       <Label
                         htmlFor="schedule-at"
                         className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground"
                       >
-                        {isScheduled ? "Reschedule for" : "Or schedule for"}
+                        Or schedule for
                       </Label>
                       <Input
                         id="schedule-at"
@@ -508,25 +487,16 @@ export function CampaignDetail() {
                         ) : (
                           <CalendarClock className="size-4" />
                         )}
-                        {isScheduled ? "Reschedule" : "Schedule"}
+                        Schedule
                       </Button>
                     </div>
                   )}
 
                   {isScheduled && (
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => unscheduleMutation.mutate()}
-                      disabled={unscheduleMutation.isPending}
-                    >
-                      {unscheduleMutation.isPending ? (
-                        <Loader2 className="size-4 animate-spin" />
-                      ) : (
-                        <CalendarX className="size-4" />
-                      )}
-                      Cancel schedule
-                    </Button>
+                    <p className="text-sm text-muted-foreground">
+                      Scheduled to send. Use <strong>Send now</strong> to
+                      deliver immediately.
+                    </p>
                   )}
 
                   {isSending && (
@@ -573,6 +543,12 @@ export function CampaignDetail() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 font-mono text-xs">
+              <div className="flex items-baseline justify-between gap-4">
+                <span className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                  Created by
+                </span>
+                <span className="text-right">{campaign.creator.name}</span>
+              </div>
               <TimelineRow label="Created" value={campaign.created_at} />
               <TimelineRow label="Updated" value={campaign.updated_at} />
               {campaign.scheduled_at && (
@@ -740,6 +716,46 @@ function RecipientMini({
           : "—"}
       </p>
     </div>
+  );
+}
+
+function SendDialog({
+  campaignName,
+  onConfirm,
+  pending,
+}: {
+  campaignName: string;
+  onConfirm: () => void;
+  pending: boolean;
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button className="w-full" disabled={pending}>
+          {pending ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Send className="size-4" />
+          )}
+          Send now
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            Send <span className="font-serif">{campaignName}</span> now?
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            Recipients will be queued immediately. Sending is permanent — once a
+            campaign is sent, it can't be unsent.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={onConfirm}>Send now</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
