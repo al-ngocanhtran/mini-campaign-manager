@@ -2,6 +2,10 @@
 node_modules/
 */node_modules/
 
+# Yarn Berry runtime cache
+.yarn/install-state.gz
+.yarn/cache/
+
 # Build output
 dist/
 build/
@@ -24,7 +28,7 @@ yarn-error.log*
 .idea/
 *.swp
 .DS_Store
-
+.claude/ 
 # Testing
 coverage/
 
@@ -33,3 +37,7 @@ Thumbs.db
 
 # Docker volumes (if bind-mounted)
 pgdata/
+
+plans/
+REQUIREMENTS.md
+

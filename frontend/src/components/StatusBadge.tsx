@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import type { Campaign, Recipient } from "@/api/client";
 
 const campaignBadge = cva(
-  "uppercase tracking-[0.10em] text-[11px] font-mono font-medium border",
+  "uppercase tracking-[0.10em] text-xs font-mono font-medium border",
   {
     variants: {
       status: {
@@ -38,7 +38,7 @@ export function StatusBadge({
 }
 
 const recipientBadge = cva(
-  "uppercase tracking-[0.10em] text-[11px] font-mono font-medium border",
+  "uppercase tracking-[0.10em] text-xs font-mono font-medium border",
   {
     variants: {
       status: {
