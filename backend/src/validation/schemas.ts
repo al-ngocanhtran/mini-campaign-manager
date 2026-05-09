@@ -59,7 +59,7 @@ export const createCampaignSchema = z.object({
   name: z.string().min(1).max(255),
   subject: z.string().min(1).max(500),
   body: z.string().min(1),
-  recipientEmails: z.array(z.string().email()).min(1).max(1000),
+  recipientEmails: z.array(emailSchema).min(1).max(1000),
 });
 
 export const updateCampaignSchema = z
@@ -67,7 +67,7 @@ export const updateCampaignSchema = z
     name: z.string().min(1).max(255).optional(),
     subject: z.string().min(1).max(500).optional(),
     body: z.string().min(1).optional(),
-    recipientEmails: z.array(z.string().email()).min(1).max(1000).optional(),
+    recipientEmails: z.array(emailSchema).min(1).max(1000).optional(),
   })
   .refine(
     (v) =>
@@ -98,6 +98,6 @@ export const scheduleCampaignSchema = z.object({
 });
 
 export const createRecipientSchema = z.object({
-  email: z.string().email(),
+  email: emailSchema,
   name: z.string().min(1).max(255).optional(),
 });
